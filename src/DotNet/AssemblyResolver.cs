@@ -44,8 +44,8 @@ namespace dnlib.DotNet {
 		// DLL files are searched before EXE files
 		static readonly IList<string> assemblyExtensions = new string[] { ".dll", ".exe" };
 
-		static readonly GacInfo gac2Info;	// .NET 1.x and 2.x
-		static readonly GacInfo gac4Info;	// .NET 4.x
+		GacInfo gac2Info;	// .NET 1.x and 2.x
+		GacInfo gac4Info;	// .NET 4.x
 
 		ModuleContext defaultModuleContext;
 		readonly Dictionary<ModuleDef, IList<string>> moduleSearchPaths = new Dictionary<ModuleDef, IList<string>>();
@@ -70,7 +70,7 @@ namespace dnlib.DotNet {
 			}
 		}
 
-		static AssemblyResolver() {
+		void InitGacInfos() {
 			var windir = Environment.GetEnvironmentVariable("WINDIR");
 			if (!string.IsNullOrEmpty(windir)) {
 				gac2Info = new GacInfo("", Path.Combine(windir, "assembly"), new string[] {
@@ -127,7 +127,7 @@ namespace dnlib.DotNet {
 		/// Default constructor
 		/// </summary>
 		public AssemblyResolver()
-			: this(null, true) {
+			: this(null, true, true) {
 		}
 
 		/// <summary>
@@ -135,7 +135,7 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="defaultModuleContext">Module context for all resolved assemblies</param>
 		public AssemblyResolver(ModuleContext defaultModuleContext)
-			: this(defaultModuleContext, true) {
+			: this(defaultModuleContext, true, true) {
 		}
 
 		/// <summary>
@@ -144,10 +144,13 @@ namespace dnlib.DotNet {
 		/// <param name="defaultModuleContext">Module context for all resolved assemblies</param>
 		/// <param name="addOtherSearchPaths">If <c>true</c>, add other common assembly search
 		/// paths, not just the module search paths and the GAC.</param>
-		public AssemblyResolver(ModuleContext defaultModuleContext, bool addOtherSearchPaths) {
+		/// <param name="searchGAC">If <c>true</c>, search the GAC for assemblies.</param>
+		public AssemblyResolver(ModuleContext defaultModuleContext, bool addOtherSearchPaths, bool searchGAC) {
 			this.defaultModuleContext = defaultModuleContext;
 			if (addOtherSearchPaths)
 				AddOtherSearchPaths(postSearchPaths);
+			if (searchGAC)
+				InitGacInfos();
 		}
 
 		/// <inheritdoc/>
