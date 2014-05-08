@@ -142,6 +142,8 @@ namespace dnlib.DotNet {
 		}
 
 		AssemblyRef CreateCorLibAssemblyRef() {
+			if (module.Assembly.IsCorLib())
+				return module.Assembly.ToAssemblyRef();
 			return module.UpdateRowId(AssemblyRefUser.CreateMscorlibReferenceCLR20());
 		}
 

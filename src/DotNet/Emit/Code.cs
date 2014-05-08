@@ -173,7 +173,7 @@
 		Neg				= 0x0065,
 		Newarr			= 0x008D,
 		Newobj			= 0x0073,
-//		No				= 0xFE19,	// Not supported by MS' CLI and must be parsed as an opcode without an operand
+  		No				= 0xFE19,	// Not supported by MS' CLI and must be parsed as an opcode without an operand
 		Nop				= 0x0000,
 		Not				= 0x0066,
 		Or				= 0x0060,

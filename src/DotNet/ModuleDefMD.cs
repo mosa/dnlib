@@ -576,6 +576,7 @@ namespace dnlib.DotNet {
 		void Initialize() {
 			var ts = metaData.TablesStream;
 
+			listAssemblyDefMD = new SimpleLazyList<AssemblyDefMD>(ts.AssemblyTable.Rows, rid2 => new AssemblyDefMD(this, rid2));
 			listModuleDefMD = new SimpleLazyList<ModuleDefMD2>(ts.ModuleTable.Rows, rid2 => rid2 == 1 ? this : new ModuleDefMD2(this, rid2));
 			listTypeRefMD = new SimpleLazyList<TypeRefMD>(ts.TypeRefTable.Rows, rid2 => new TypeRefMD(this, rid2));
 			listTypeDefMD = new SimpleLazyList<TypeDefMD>(ts.TypeDefTable.Rows, rid2 => new TypeDefMD(this, rid2));
@@ -593,7 +594,6 @@ namespace dnlib.DotNet {
 			listModuleRefMD = new SimpleLazyList<ModuleRefMD>(ts.ModuleRefTable.Rows, rid2 => new ModuleRefMD(this, rid2));
 			listTypeSpecMD = new SimpleLazyList2<TypeSpecMD>(ts.TypeSpecTable.Rows, (rid2, gpContext) => new TypeSpecMD(this, rid2, gpContext));
 			listImplMapMD = new SimpleLazyList<ImplMapMD>(ts.ImplMapTable.Rows, rid2 => new ImplMapMD(this, rid2));
-			listAssemblyDefMD = new SimpleLazyList<AssemblyDefMD>(ts.AssemblyTable.Rows, rid2 => new AssemblyDefMD(this, rid2));
 			listFileDefMD = new SimpleLazyList<FileDefMD>(ts.FileTable.Rows, rid2 => new FileDefMD(this, rid2));
 			listAssemblyRefMD = new SimpleLazyList<AssemblyRefMD>(ts.AssemblyRefTable.Rows, rid2 => new AssemblyRefMD(this, rid2));
 			listExportedTypeMD = new SimpleLazyList<ExportedTypeMD>(ts.ExportedTypeTable.Rows, rid2 => new ExportedTypeMD(this, rid2));
