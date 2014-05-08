@@ -447,6 +447,7 @@ namespace dnlib.DotNet {
 			// FindCorLibAssemblyRef() needs this list initialized. Other code may need corLibTypes
 			// so initialize these two first.
 			listAssemblyRefMD = new SimpleLazyList<AssemblyRefMD>(ts.AssemblyRefTable.Rows, rid2 => new AssemblyRefMD(this, rid2));
+			listAssemblyDefMD = new SimpleLazyList<AssemblyDefMD>(ts.AssemblyTable.Rows, rid2 => new AssemblyDefMD(this, rid2));
 			corLibTypes = new CorLibTypes(this, FindCorLibAssemblyRef());
 
 			listModuleDefMD = new SimpleLazyList<ModuleDefMD2>(ts.ModuleTable.Rows, rid2 => rid2 == 1 ? this : new ModuleDefMD2(this, rid2));
@@ -466,7 +467,6 @@ namespace dnlib.DotNet {
 			listModuleRefMD = new SimpleLazyList<ModuleRefMD>(ts.ModuleRefTable.Rows, rid2 => new ModuleRefMD(this, rid2));
 			listTypeSpecMD = new SimpleLazyList<TypeSpecMD>(ts.TypeSpecTable.Rows, rid2 => new TypeSpecMD(this, rid2));
 			listImplMapMD = new SimpleLazyList<ImplMapMD>(ts.ImplMapTable.Rows, rid2 => new ImplMapMD(this, rid2));
-			listAssemblyDefMD = new SimpleLazyList<AssemblyDefMD>(ts.AssemblyTable.Rows, rid2 => new AssemblyDefMD(this, rid2));
 			listFileDefMD = new SimpleLazyList<FileDefMD>(ts.FileTable.Rows, rid2 => new FileDefMD(this, rid2));
 			listExportedTypeMD = new SimpleLazyList<ExportedTypeMD>(ts.ExportedTypeTable.Rows, rid2 => new ExportedTypeMD(this, rid2));
 			listManifestResourceMD = new SimpleLazyList<ManifestResourceMD>(ts.ManifestResourceTable.Rows, rid2 => new ManifestResourceMD(this, rid2));
