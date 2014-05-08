@@ -1354,7 +1354,7 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="ModuleContext"/> instance</returns>
 		public static ModuleContext CreateModuleContext(bool addOtherSearchPaths) {
 			var ctx = new ModuleContext();
-			var asmRes = new AssemblyResolver(ctx, addOtherSearchPaths);
+			var asmRes = new AssemblyResolver(ctx, addOtherSearchPaths, true);
 			var res = new Resolver(asmRes);
 			ctx.AssemblyResolver = asmRes;
 			ctx.Resolver = res;

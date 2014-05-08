@@ -24,8 +24,8 @@ namespace dnlib.DotNet {
 		static readonly string[] assemblyExtensions = new string[] { ".dll", ".exe" };
 		static readonly string[] winMDAssemblyExtensions = new string[] { ".winmd" };
 
-		static readonly List<GacInfo> gacInfos;
-		static readonly List<string> extraMonoPaths;
+		List<GacInfo> gacInfos;
+		List<string> extraMonoPaths;
 		static readonly string[] monoVerDirs = new string[] {
 			"4.5", "4.0",
 			"3.5", "3.0", "2.0",
@@ -58,7 +58,7 @@ namespace dnlib.DotNet {
 			}
 		}
 
-		static AssemblyResolver() {
+		void InitGacInfos() {
 			gacInfos = new List<GacInfo>();
 
 			if (Type.GetType("Mono.Runtime") != null) {
@@ -191,7 +191,7 @@ namespace dnlib.DotNet {
 		/// Default constructor
 		/// </summary>
 		public AssemblyResolver()
-			: this(null, true) {
+			: this(null, true, true) {
 		}
 
 		/// <summary>
@@ -199,7 +199,7 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="defaultModuleContext">Module context for all resolved assemblies</param>
 		public AssemblyResolver(ModuleContext defaultModuleContext)
-			: this(defaultModuleContext, true) {
+			: this(defaultModuleContext, true, true) {
 		}
 
 		/// <summary>
@@ -208,11 +208,14 @@ namespace dnlib.DotNet {
 		/// <param name="defaultModuleContext">Module context for all resolved assemblies</param>
 		/// <param name="addOtherSearchPaths">If <c>true</c>, add other common assembly search
 		/// paths, not just the module search paths and the GAC.</param>
-		public AssemblyResolver(ModuleContext defaultModuleContext, bool addOtherSearchPaths) {
+		/// <param name="searchGAC">If <c>true</c>, search the GAC for assemblies.</param>
+		public AssemblyResolver(ModuleContext defaultModuleContext, bool addOtherSearchPaths, bool searchGAC) {
 			this.defaultModuleContext = defaultModuleContext;
 			this.enableFrameworkRedirect = true;
 			if (addOtherSearchPaths)
 				AddOtherSearchPaths(postSearchPaths);
+			if (searchGAC)
+				InitGacInfos();
 		}
 
 		/// <inheritdoc/>
@@ -548,7 +551,7 @@ namespace dnlib.DotNet {
 			}
 		}
 
-		static IEnumerable<string> GetExtraMonoPaths(IAssembly assembly, ModuleDef sourceModule) {
+		IEnumerable<string> GetExtraMonoPaths(IAssembly assembly, ModuleDef sourceModule) {
 			if (extraMonoPaths != null) {
 				foreach (var dir in extraMonoPaths) {
 					var file = Path.Combine(dir, assembly.Name + ".dll");
