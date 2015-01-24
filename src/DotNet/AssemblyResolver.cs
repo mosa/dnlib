@@ -23,11 +23,11 @@ namespace dnlib.DotNet {
 		// DLL files are searched before EXE files
 		static readonly IList<string> assemblyExtensions = new string[] { ".dll", ".exe" };
 
-		static readonly GacInfo gac2Info;	// .NET 1.x and 2.x
-		static readonly GacInfo gac4Info;	// .NET 4.x
+		GacInfo gac2Info;	// .NET 1.x and 2.x
+		GacInfo gac4Info;	// .NET 4.x
 
-		static readonly Dictionary<string, FrameworkRedirectInfo> frmRedir2;
-		static readonly Dictionary<string, FrameworkRedirectInfo> frmRedir4;
+		Dictionary<string, FrameworkRedirectInfo> frmRedir2;
+		Dictionary<string, FrameworkRedirectInfo> frmRedir4;
 
 		ModuleContext defaultModuleContext;
 		readonly Dictionary<ModuleDef, IList<string>> moduleSearchPaths = new Dictionary<ModuleDef, IList<string>>();
@@ -63,7 +63,8 @@ namespace dnlib.DotNet {
 			}
 		}
 
-		static AssemblyResolver() {
+		void InitGacInfos()
+		{
 			var windir = Environment.GetEnvironmentVariable("WINDIR");
 			if (!string.IsNullOrEmpty(windir)) {
 				gac2Info = new GacInfo("", Path.Combine(windir, "assembly"), new string[] {
@@ -80,7 +81,7 @@ namespace dnlib.DotNet {
 			InitFrameworkRedirectV4();
 		}
 
-		static void InitFrameworkRedirectV2() {
+		void InitFrameworkRedirectV2() {
 			frmRedir2["Accessibility"] = new FrameworkRedirectInfo("b03f5f7f11d50a3a", "2.0.0.0");
 			frmRedir2["cscompmgd"] = new FrameworkRedirectInfo("b03f5f7f11d50a3a", "8.0.0.0");
 			frmRedir2["CustomMarshalers"] = new FrameworkRedirectInfo("b03f5f7f11d50a3a", "2.0.0.0");
@@ -138,7 +139,7 @@ namespace dnlib.DotNet {
 			frmRedir2["vjswfchtml"] = new FrameworkRedirectInfo("b03f5f7f11d50a3a", "2.0.0.0");
 		}
 
-		static void InitFrameworkRedirectV4() {
+		void InitFrameworkRedirectV4() {
 			frmRedir4["Accessibility"] = new FrameworkRedirectInfo("b03f5f7f11d50a3a", "4.0.0.0");
 			frmRedir4["CustomMarshalers"] = new FrameworkRedirectInfo("b03f5f7f11d50a3a", "4.0.0.0");
 			frmRedir4["ISymWrapper"] = new FrameworkRedirectInfo("b03f5f7f11d50a3a", "4.0.0.0");
@@ -346,7 +347,7 @@ namespace dnlib.DotNet {
 			frmRedir4["System.Xml.Serialization"] = new FrameworkRedirectInfo("b77a5c561934e089", "4.0.0.0");
 		}
 
-		static void ApplyFrameworkRedirect(ref IAssembly assembly, ModuleDef sourceModule) {
+		void ApplyFrameworkRedirect(ref IAssembly assembly, ModuleDef sourceModule) {
 			if (sourceModule == null)
 				return;
 			if (!Utils.LocaleEquals(assembly.Culture, ""))
@@ -422,7 +423,7 @@ namespace dnlib.DotNet {
 		/// Default constructor
 		/// </summary>
 		public AssemblyResolver()
-			: this(null, true) {
+			: this(null, true, true) {
 		}
 
 		/// <summary>
@@ -430,7 +431,7 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="defaultModuleContext">Module context for all resolved assemblies</param>
 		public AssemblyResolver(ModuleContext defaultModuleContext)
-			: this(defaultModuleContext, true) {
+			: this(defaultModuleContext, true, true) {
 		}
 
 		/// <summary>
@@ -439,11 +440,14 @@ namespace dnlib.DotNet {
 		/// <param name="defaultModuleContext">Module context for all resolved assemblies</param>
 		/// <param name="addOtherSearchPaths">If <c>true</c>, add other common assembly search
 		/// paths, not just the module search paths and the GAC.</param>
-		public AssemblyResolver(ModuleContext defaultModuleContext, bool addOtherSearchPaths) {
+		/// <param name="searchGAC">If <c>true</c>, search the GAC for assemblies.</param>
+		public AssemblyResolver(ModuleContext defaultModuleContext, bool addOtherSearchPaths, bool searchGAC) {
 			this.defaultModuleContext = defaultModuleContext;
-			this.enableFrameworkRedirect = true;
+			this.enableFrameworkRedirect = searchGAC;
 			if (addOtherSearchPaths)
 				AddOtherSearchPaths(postSearchPaths);
+			if (searchGAC)
+				InitGacInfos();
 		}
 
 		/// <inheritdoc/>
