@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -230,13 +209,15 @@ namespace dnlib.DotNet.MD {
 
 		/// <summary>
 		/// Binary searches the table for a <c>rid</c> whose key column at index
-		/// <paramref name="keyColIndex"/> is equal to <paramref name="key"/>.
+		/// <paramref name="keyColIndex"/> is equal to <paramref name="key"/>. The
+		/// <see cref="tablesStream"/> has acquired its lock so only <c>*_NoLock</c> methods
+		/// may be called.
 		/// </summary>
 		/// <param name="tableSource">Table to search</param>
 		/// <param name="keyColIndex">Key column index</param>
 		/// <param name="key">Key</param>
 		/// <returns>The <c>rid</c> of the found row, or 0 if none found</returns>
-		protected abstract uint BinarySearch(MDTable tableSource, int keyColIndex, uint key);
+		protected abstract uint BinarySearch_NoLock(MDTable tableSource, int keyColIndex, uint key);
 
 		/// <summary>
 		/// Finds all rows owned by <paramref name="key"/> in table <paramref name="tableSource"/>
@@ -247,25 +228,32 @@ namespace dnlib.DotNet.MD {
 		/// <param name="key">Key</param>
 		/// <returns>A <see cref="RidList"/> instance</returns>
 		protected RidList FindAllRows(MDTable tableSource, int keyColIndex, uint key) {
-			uint startRid = BinarySearch(tableSource, keyColIndex, key);
-			if (tableSource == null || tableSource.IsInvalidRID(startRid))
+#if THREAD_SAFE
+			tablesStream.theLock.EnterWriteLock(); try {
+#endif
+			uint startRid = BinarySearch_NoLock(tableSource, keyColIndex, key);
+			if (tableSource.IsInvalidRID(startRid))
 				return RidList.Empty;
 			uint endRid = startRid + 1;
+			var column = tableSource.TableInfo.Columns[keyColIndex];
 			for (; startRid > 1; startRid--) {
 				uint key2;
-				if (!tablesStream.ReadColumn(tableSource, startRid - 1, keyColIndex, out key2))
+				if (!tablesStream.ReadColumn_NoLock(tableSource, startRid - 1, column, out key2))
 					break;	// Should never happen since startRid is valid
 				if (key != key2)
 					break;
 			}
 			for (; endRid <= tableSource.Rows; endRid++) {
 				uint key2;
-				if (!tablesStream.ReadColumn(tableSource, endRid, keyColIndex, out key2))
+				if (!tablesStream.ReadColumn_NoLock(tableSource, endRid, column, out key2))
 					break;	// Should never happen since endRid is valid
 				if (key != key2)
 					break;
 			}
 			return new ContiguousRidList(startRid, endRid - startRid);
+#if THREAD_SAFE
+			} finally { tablesStream.theLock.ExitWriteLock(); }
+#endif
 		}
 
 		/// <summary>
@@ -283,17 +271,11 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public RidList GetInterfaceImplRidList(uint typeDefRid) {
-			var tbl = tablesStream.TypeDefTable;
-			if (tbl == null || tbl.IsInvalidRID(typeDefRid))
-				return RidList.Empty;
 			return FindAllRowsUnsorted(tablesStream.InterfaceImplTable, 0, typeDefRid);
 		}
 
 		/// <inheritdoc/>
 		public RidList GetGenericParamRidList(Table table, uint rid) {
-			var tbl = tablesStream.Get(table);
-			if (tbl == null || tbl.IsInvalidRID(rid))
-				return RidList.Empty;
 			uint codedToken;
 			if (!CodedToken.TypeOrMethodDef.Encode(new MDToken(table, rid), out codedToken))
 				return RidList.Empty;
@@ -303,17 +285,11 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public RidList GetGenericParamConstraintRidList(uint genericParamRid) {
-			var tbl = tablesStream.GenericParamTable;
-			if (tbl == null || tbl.IsInvalidRID(genericParamRid))
-				return RidList.Empty;
 			return FindAllRowsUnsorted(tablesStream.GenericParamConstraintTable, 0, genericParamRid);
 		}
 
 		/// <inheritdoc/>
 		public RidList GetCustomAttributeRidList(Table table, uint rid) {
-			var tbl = tablesStream.Get(table);
-			if (tbl == null || tbl.IsInvalidRID(rid))
-				return RidList.Empty;
 			uint codedToken;
 			if (!CodedToken.HasCustomAttribute.Encode(new MDToken(table, rid), out codedToken))
 				return RidList.Empty;
@@ -322,9 +298,6 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public RidList GetDeclSecurityRidList(Table table, uint rid) {
-			var tbl = tablesStream.Get(table);
-			if (tbl == null || tbl.IsInvalidRID(rid))
-				return RidList.Empty;
 			uint codedToken;
 			if (!CodedToken.HasDeclSecurity.Encode(new MDToken(table, rid), out codedToken))
 				return RidList.Empty;
@@ -333,9 +306,6 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public RidList GetMethodSemanticsRidList(Table table, uint rid) {
-			var tbl = tablesStream.Get(table);
-			if (tbl == null || tbl.IsInvalidRID(rid))
-				return RidList.Empty;
 			uint codedToken;
 			if (!CodedToken.HasSemantic.Encode(new MDToken(table, rid), out codedToken))
 				return RidList.Empty;
@@ -344,35 +314,23 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public RidList GetMethodImplRidList(uint typeDefRid) {
-			var tbl = tablesStream.TypeDefTable;
-			if (tbl == null || tbl.IsInvalidRID(typeDefRid))
-				return RidList.Empty;
 			return FindAllRowsUnsorted(tablesStream.MethodImplTable, 0, typeDefRid);
 		}
 
 		/// <inheritdoc/>
 		public uint GetClassLayoutRid(uint typeDefRid) {
-			var tbl = tablesStream.TypeDefTable;
-			if (tbl == null || tbl.IsInvalidRID(typeDefRid))
-				return 0;
 			var list = FindAllRowsUnsorted(tablesStream.ClassLayoutTable, 2, typeDefRid);
 			return list.Length == 0 ? 0 : list[0];
 		}
 
 		/// <inheritdoc/>
 		public uint GetFieldLayoutRid(uint fieldRid) {
-			var tbl = tablesStream.FieldTable;
-			if (tbl == null || tbl.IsInvalidRID(fieldRid))
-				return 0;
 			var list = FindAllRowsUnsorted(tablesStream.FieldLayoutTable, 1, fieldRid);
 			return list.Length == 0 ? 0 : list[0];
 		}
 
 		/// <inheritdoc/>
 		public uint GetFieldMarshalRid(Table table, uint rid) {
-			var tbl = tablesStream.Get(table);
-			if (tbl == null || tbl.IsInvalidRID(rid))
-				return 0;
 			uint codedToken;
 			if (!CodedToken.HasFieldMarshal.Encode(new MDToken(table, rid), out codedToken))
 				return 0;
@@ -382,18 +340,12 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public uint GetFieldRVARid(uint fieldRid) {
-			var tbl = tablesStream.FieldTable;
-			if (tbl == null || tbl.IsInvalidRID(fieldRid))
-				return 0;
 			var list = FindAllRowsUnsorted(tablesStream.FieldRVATable, 1, fieldRid);
 			return list.Length == 0 ? 0 : list[0];
 		}
 
 		/// <inheritdoc/>
 		public uint GetImplMapRid(Table table, uint rid) {
-			var tbl = tablesStream.Get(table);
-			if (tbl == null || tbl.IsInvalidRID(rid))
-				return 0;
 			uint codedToken;
 			if (!CodedToken.MemberForwarded.Encode(new MDToken(table, rid), out codedToken))
 				return 0;
@@ -403,36 +355,24 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public uint GetNestedClassRid(uint typeDefRid) {
-			var tbl = tablesStream.TypeDefTable;
-			if (tbl == null || tbl.IsInvalidRID(typeDefRid))
-				return 0;
 			var list = FindAllRowsUnsorted(tablesStream.NestedClassTable, 0, typeDefRid);
 			return list.Length == 0 ? 0 : list[0];
 		}
 
 		/// <inheritdoc/>
 		public uint GetEventMapRid(uint typeDefRid) {
-			var tbl = tablesStream.TypeDefTable;
-			if (tbl == null || tbl.IsInvalidRID(typeDefRid))
-				return 0;
 			var list = FindAllRowsUnsorted(tablesStream.EventMapTable, 0, typeDefRid);
 			return list.Length == 0 ? 0 : list[0];
 		}
 
 		/// <inheritdoc/>
 		public uint GetPropertyMapRid(uint typeDefRid) {
-			var tbl = tablesStream.TypeDefTable;
-			if (tbl == null || tbl.IsInvalidRID(typeDefRid))
-				return 0;
 			var list = FindAllRowsUnsorted(tablesStream.PropertyMapTable, 0, typeDefRid);
 			return list.Length == 0 ? 0 : list[0];
 		}
 
 		/// <inheritdoc/>
 		public uint GetConstantRid(Table table, uint rid) {
-			var tbl = tablesStream.Get(table);
-			if (tbl == null || tbl.IsInvalidRID(rid))
-				return 0;
 			uint codedToken;
 			if (!CodedToken.HasConstant.Encode(new MDToken(table, rid), out codedToken))
 				return 0;
@@ -442,7 +382,7 @@ namespace dnlib.DotNet.MD {
 
 		/// <inheritdoc/>
 		public uint GetOwnerTypeOfField(uint fieldRid) {
-			if (fieldRidToTypeDefRid == null) 
+			if (fieldRidToTypeDefRid == null)
 				InitializeInverseFieldOwnerRidList();
 			uint index = fieldRid - 1;
 			if (index >= fieldRidToTypeDefRid.LongLength)
@@ -577,12 +517,18 @@ namespace dnlib.DotNet.MD {
 			// Find all owners by reading the GenericParam.Owner column
 			var ownerCol = gpTable.TableInfo.Columns[2];
 			var ownersDict = new Dictionary<uint, bool>();
+#if THREAD_SAFE
+			tablesStream.theLock.EnterWriteLock(); try {
+#endif
 			for (uint rid = 1; rid <= gpTable.Rows; rid++) {
 				uint owner;
-				if (!tablesStream.ReadColumn(gpTable, rid, ownerCol, out owner))
+				if (!tablesStream.ReadColumn_NoLock(gpTable, rid, ownerCol, out owner))
 					continue;
 				ownersDict[owner] = true;
 			}
+#if THREAD_SAFE
+			} finally { tablesStream.theLock.ExitWriteLock(); }
+#endif
 
 			// Now that we have the owners, find all the generic params they own. An obfuscated
 			// module could have 2+ owners pointing to the same generic param row.
@@ -624,12 +570,18 @@ namespace dnlib.DotNet.MD {
 
 			var ownerCol = gpcTable.TableInfo.Columns[0];
 			var ownersDict = new Dictionary<uint, bool>();
+#if THREAD_SAFE
+			tablesStream.theLock.EnterWriteLock(); try {
+#endif
 			for (uint rid = 1; rid <= gpcTable.Rows; rid++) {
 				uint owner;
-				if (!tablesStream.ReadColumn(gpcTable, rid, ownerCol, out owner))
+				if (!tablesStream.ReadColumn_NoLock(gpcTable, rid, ownerCol, out owner))
 					continue;
 				ownersDict[owner] = true;
 			}
+#if THREAD_SAFE
+			} finally { tablesStream.theLock.ExitWriteLock(); }
+#endif
 
 			var owners = new List<uint>(ownersDict.Keys);
 			owners.Sort();

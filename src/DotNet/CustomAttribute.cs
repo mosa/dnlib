@@ -1,28 +1,8 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System.Collections.Generic;
 using dnlib.Threading;
+using dnlib.IO;
 
 #if THREAD_SAFE
 using ThreadSafe = dnlib.Threading.Collections;
@@ -39,6 +19,7 @@ namespace dnlib.DotNet {
 		byte[] rawData;
 		readonly ThreadSafe.IList<CAArgument> arguments;
 		readonly ThreadSafe.IList<CANamedArgument> namedArguments;
+		readonly IBinaryReader blobReader;
 
 		/// <summary>
 		/// Gets/sets the custom attribute constructor
@@ -53,8 +34,8 @@ namespace dnlib.DotNet {
 		/// </summary>
 		public ITypeDefOrRef AttributeType {
 			get {
-				var methodRef = ctor as IMethod;
-				return methodRef == null ? null : methodRef.DeclaringType;
+				var cat = ctor;
+				return cat == null ? null : cat.DeclaringType;
 			}
 		}
 
@@ -86,7 +67,7 @@ namespace dnlib.DotNet {
 		}
 
 		/// <summary>
-		/// Gets the raw custom attribute blob or <c>null</c>
+		/// Gets the raw custom attribute blob or <c>null</c> if the CA was successfully parsed.
 		/// </summary>
 		public byte[] RawData {
 			get { return rawData; }
@@ -150,7 +131,7 @@ namespace dnlib.DotNet {
 		/// <param name="ctor">Custom attribute constructor</param>
 		/// <param name="rawData">Raw custom attribute blob</param>
 		public CustomAttribute(ICustomAttributeType ctor, byte[] rawData)
-			: this(ctor, null, null) {
+			: this(ctor, null, null, null) {
 			this.rawData = rawData;
 		}
 
@@ -159,7 +140,7 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="ctor">Custom attribute constructor</param>
 		public CustomAttribute(ICustomAttributeType ctor)
-			: this(ctor, null, null) {
+			: this(ctor, null, null, null) {
 		}
 
 		/// <summary>
@@ -186,10 +167,22 @@ namespace dnlib.DotNet {
 		/// <param name="ctor">Custom attribute constructor</param>
 		/// <param name="arguments">Constructor arguments or <c>null</c> if none</param>
 		/// <param name="namedArguments">Named arguments or <c>null</c> if none</param>
-		public CustomAttribute(ICustomAttributeType ctor, IEnumerable<CAArgument> arguments, IEnumerable<CANamedArgument> namedArguments) {
+		public CustomAttribute(ICustomAttributeType ctor, IEnumerable<CAArgument> arguments, IEnumerable<CANamedArgument> namedArguments)
+			: this(ctor, arguments, namedArguments, null) {
+		}
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="ctor">Custom attribute constructor</param>
+		/// <param name="arguments">Constructor arguments or <c>null</c> if none</param>
+		/// <param name="namedArguments">Named arguments or <c>null</c> if none</param>
+		/// <param name="blobReader">A reader that returns the original custom attribute blob data</param>
+		public CustomAttribute(ICustomAttributeType ctor, IEnumerable<CAArgument> arguments, IEnumerable<CANamedArgument> namedArguments, IBinaryReader blobReader) {
 			this.ctor = ctor;
 			this.arguments = arguments == null ? ThreadSafeListCreator.Create<CAArgument>() : ThreadSafeListCreator.Create<CAArgument>(arguments);
 			this.namedArguments = namedArguments == null ? ThreadSafeListCreator.Create<CANamedArgument>() : ThreadSafeListCreator.Create<CANamedArgument>(namedArguments);
+			this.blobReader = blobReader;
 		}
 
 		/// <summary>
@@ -198,10 +191,12 @@ namespace dnlib.DotNet {
 		/// <param name="ctor">Custom attribute constructor</param>
 		/// <param name="arguments">Constructor arguments. The list is now owned by this instance.</param>
 		/// <param name="namedArguments">Named arguments. The list is now owned by this instance.</param>
-		internal CustomAttribute(ICustomAttributeType ctor, List<CAArgument> arguments, List<CANamedArgument> namedArguments) {
+		/// <param name="blobReader">A reader that returns the original custom attribute blob data</param>
+		internal CustomAttribute(ICustomAttributeType ctor, List<CAArgument> arguments, List<CANamedArgument> namedArguments, IBinaryReader blobReader) {
 			this.ctor = ctor;
 			this.arguments = arguments == null ? ThreadSafeListCreator.Create<CAArgument>() : ThreadSafeListCreator.MakeThreadSafe(arguments);
 			this.namedArguments = namedArguments == null ? ThreadSafeListCreator.Create<CANamedArgument>() : ThreadSafeListCreator.MakeThreadSafe(namedArguments);
+			this.blobReader = blobReader;
 		}
 
 		/// <summary>
@@ -268,6 +263,22 @@ namespace dnlib.DotNet {
 			return null;
 		}
 
+		/// <summary>
+		/// Gets the binary custom attribute data that was used to create this instance.
+		/// </summary>
+		/// <returns>Blob of this custom attribute</returns>
+		public byte[] GetBlob() {
+			if (rawData != null)
+				return rawData;
+			if (blobReader != null) {
+#if THREAD_SAFE
+				lock (this)
+#endif
+					return blobReader.ReadAllBytes();
+			}
+			return new byte[0];
+		}
+
 		/// <inheritdoc/>
 		public override string ToString() {
 			return TypeFullName;
@@ -318,7 +329,8 @@ namespace dnlib.DotNet {
 
 		/// <inheritdoc/>
 		public override string ToString() {
-			return string.Format("{0} ({1})", value, type);
+			object v = value;
+			return string.Format("{0} ({1})", v == null ? "null" : v, type);
 		}
 	}
 
@@ -439,7 +451,8 @@ namespace dnlib.DotNet {
 
 		/// <inheritdoc/>
 		public override string ToString() {
-			return string.Format("({0}) {1} {2} = {3} ({4})", isField ? "field" : "property", type, name, Value, ArgumentType);
+			object v = Value;
+			return string.Format("({0}) {1} {2} = {3} ({4})", isField ? "field" : "property", type, name, v == null ? "null" : v, ArgumentType);
 		}
 	}
 }

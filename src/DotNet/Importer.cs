@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -72,6 +51,7 @@ namespace dnlib.DotNet {
 	/// </summary>
 	public struct Importer {
 		readonly ModuleDef module;
+		readonly GenericParamContext gpContext;
 		RecursionCounter recursionCounter;
 		ImporterOptions options;
 
@@ -131,10 +111,17 @@ namespace dnlib.DotNet {
 		/// Constructor
 		/// </summary>
 		/// <param name="module">The module that will own all references</param>
-		public Importer(ModuleDef module) {
-			this.module = module;
-			this.recursionCounter = new RecursionCounter();
-			this.options = 0;
+		public Importer(ModuleDef module)
+			: this(module, 0, new GenericParamContext()) {
+		}
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="module">The module that will own all references</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		public Importer(ModuleDef module, GenericParamContext gpContext)
+			: this(module, 0, gpContext) {
 		}
 
 		/// <summary>
@@ -142,10 +129,21 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="module">The module that will own all references</param>
 		/// <param name="options">Importer options</param>
-		public Importer(ModuleDef module, ImporterOptions options) {
+		public Importer(ModuleDef module, ImporterOptions options)
+			: this(module, options, new GenericParamContext()) {
+		}
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="module">The module that will own all references</param>
+		/// <param name="options">Importer options</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		public Importer(ModuleDef module, ImporterOptions options, GenericParamContext gpContext) {
 			this.module = module;
 			this.recursionCounter = new RecursionCounter();
 			this.options = options;
+			this.gpContext = gpContext;
 		}
 
 		/// <summary>
@@ -203,8 +201,8 @@ namespace dnlib.DotNet {
 			case ElementType.SZArray:	return new SZArraySig(ImportAsTypeSig(type.GetElementType(), treatAsGenericInst));
 			case ElementType.ValueType: return new ValueTypeSig(CreateTypeRef(type));
 			case ElementType.Class:		return new ClassSig(CreateTypeRef(type));
-			case ElementType.Var:		return new GenericVar((uint)type.GenericParameterPosition);
-			case ElementType.MVar:		return new GenericMVar((uint)type.GenericParameterPosition);
+			case ElementType.Var:		return new GenericVar((uint)type.GenericParameterPosition, gpContext.Type);
+			case ElementType.MVar:		return new GenericMVar((uint)type.GenericParameterPosition, gpContext.Method);
 
 			case ElementType.I:
 				FixSignature = true;	// FnPtr is mapped to System.IntPtr
@@ -787,11 +785,11 @@ namespace dnlib.DotNet {
 			case ElementType.ByRef:		result = new ByRefSig(Import(type.Next)); break;
 			case ElementType.ValueType: result = CreateClassOrValueType((type as ClassOrValueTypeSig).TypeDefOrRef, true); break;
 			case ElementType.Class:		result = CreateClassOrValueType((type as ClassOrValueTypeSig).TypeDefOrRef, false); break;
-			case ElementType.Var:		result = new GenericVar((type as GenericVar).Number); break;
+			case ElementType.Var:		result = new GenericVar((type as GenericVar).Number, gpContext.Type); break;
 			case ElementType.ValueArray:result = new ValueArraySig(Import(type.Next), (type as ValueArraySig).Size); break;
 			case ElementType.FnPtr:		result = new FnPtrSig(Import((type as FnPtrSig).Signature)); break;
 			case ElementType.SZArray:	result = new SZArraySig(Import(type.Next)); break;
-			case ElementType.MVar:		result = new GenericMVar((type as GenericMVar).Number); break;
+			case ElementType.MVar:		result = new GenericMVar((type as GenericMVar).Number, gpContext.Method); break;
 			case ElementType.CModReqd:	result = new CModReqdSig(Import((type as ModifierSig).Modifier), Import(type.Next)); break;
 			case ElementType.CModOpt:	result = new CModOptSig(Import((type as ModifierSig).Modifier), Import(type.Next)); break;
 			case ElementType.Module:	result = new ModuleSig((type as ModuleSig).Index, Import(type.Next)); break;
@@ -976,15 +974,14 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="field">The field</param>
 		/// <returns>The imported type or <c>null</c> if <paramref name="field"/> is invalid</returns>
-		public IField Import(IField field) {
+		public MemberRef Import(IField field) {
 			if (field == null)
 				return null;
 			if (!recursionCounter.Increment())
 				return null;
 
-			IField result;
+			MemberRef result, mr;
 			FieldDef fd;
-			MemberRef mr;
 
 			if ((fd = field as FieldDef) != null)
 				result = Import(fd);

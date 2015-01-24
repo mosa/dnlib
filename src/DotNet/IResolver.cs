@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿namespace dnlib.DotNet {
 	/// <summary>
@@ -36,8 +15,9 @@
 		/// Resolves a type
 		/// </summary>
 		/// <param name="typeRef">The type</param>
+		/// <param name="sourceModule">The module that needs to resolve the type or <c>null</c></param>
 		/// <returns>A <see cref="TypeDef"/> instance or <c>null</c> if it couldn't be resolved</returns>
-		TypeDef Resolve(TypeRef typeRef);
+		TypeDef Resolve(TypeRef typeRef, ModuleDef sourceModule);
 	}
 
 	/// <summary>
@@ -59,13 +39,35 @@
 		/// </summary>
 		/// <param name="self">this</param>
 		/// <param name="typeRef">The type</param>
+		/// <returns>A <see cref="TypeDef"/> instance or <c>null</c> if it couldn't be resolved</returns>
+		public static TypeDef Resolve(this ITypeResolver self, TypeRef typeRef) {
+			return self.Resolve(typeRef, null);
+		}
+
+		/// <summary>
+		/// Resolves a type
+		/// </summary>
+		/// <param name="self">this</param>
+		/// <param name="typeRef">The type</param>
 		/// <returns>A <see cref="TypeDef"/> instance</returns>
 		/// <exception cref="TypeResolveException">If the type couldn't be resolved</exception>
 		public static TypeDef ResolveThrow(this ITypeResolver self, TypeRef typeRef) {
-			var type = self.Resolve(typeRef);
+			return self.ResolveThrow(typeRef, null);
+		}
+
+		/// <summary>
+		/// Resolves a type
+		/// </summary>
+		/// <param name="self">this</param>
+		/// <param name="typeRef">The type</param>
+		/// <param name="sourceModule">The module that needs to resolve the type or <c>null</c></param>
+		/// <returns>A <see cref="TypeDef"/> instance</returns>
+		/// <exception cref="TypeResolveException">If the type couldn't be resolved</exception>
+		public static TypeDef ResolveThrow(this ITypeResolver self, TypeRef typeRef, ModuleDef sourceModule) {
+			var type = self.Resolve(typeRef, sourceModule);
 			if (type != null)
 				return type;
-			throw new TypeResolveException(string.Format("Could not resolve type: {0}", typeRef));
+			throw new TypeResolveException(string.Format("Could not resolve type: {0} ({1})", typeRef, typeRef == null ? null : typeRef.DefinitionAssembly));
 		}
 
 		/// <summary>
@@ -79,7 +81,7 @@
 			var memberDef = self.Resolve(memberRef);
 			if (memberDef != null)
 				return memberDef;
-			throw new MemberRefResolveException(string.Format("Could not resolve method/field: {0}", memberRef));
+			throw new MemberRefResolveException(string.Format("Could not resolve method/field: {0} ({1})", memberRef, memberRef == null ? null : memberRef.GetDefinitionAssembly()));
 		}
 
 		/// <summary>
@@ -103,7 +105,7 @@
 			var field = self.Resolve(memberRef) as FieldDef;
 			if (field != null)
 				return field;
-			throw new MemberRefResolveException(string.Format("Could not resolve field: {0}", memberRef));
+			throw new MemberRefResolveException(string.Format("Could not resolve field: {0} ({1})", memberRef, memberRef == null ? null : memberRef.GetDefinitionAssembly()));
 		}
 
 		/// <summary>
@@ -127,7 +129,7 @@
 			var method = self.Resolve(memberRef) as MethodDef;
 			if (method != null)
 				return method;
-			throw new MemberRefResolveException(string.Format("Could not resolve method: {0}", memberRef));
+			throw new MemberRefResolveException(string.Format("Could not resolve method: {0} ({1})", memberRef, memberRef == null ? null : memberRef.GetDefinitionAssembly()));
 		}
 	}
 }

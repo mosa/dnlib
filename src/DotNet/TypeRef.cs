@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Threading;
@@ -41,6 +20,10 @@ namespace dnlib.DotNet {
 		/// The owner module
 		/// </summary>
 		protected ModuleDef module;
+
+#if THREAD_SAFE
+		readonly Lock theLock = Lock.Create();
+#endif
 
 		/// <inheritdoc/>
 		public MDToken MDToken {
@@ -71,16 +54,6 @@ namespace dnlib.DotNet {
 		/// <inheritdoc/>
 		public int ResolutionScopeTag {
 			get { return 3; }
-		}
-
-		/// <inheritdoc/>
-		bool IGenericParameterProvider.IsMethod {
-			get { return false; }
-		}
-
-		/// <inheritdoc/>
-		bool IGenericParameterProvider.IsType {
-			get { return true; }
 		}
 
 		/// <inheritdoc/>
@@ -138,6 +111,14 @@ namespace dnlib.DotNet {
 			get { return this; }
 		}
 
+		/// <summary>
+		/// Always returns <c>false</c> since a <see cref="TypeRef"/> does not contain any
+		/// <see cref="GenericVar"/> or <see cref="GenericMVar"/>.
+		/// </summary>
+		public bool ContainsGenericParameter {
+			get { return false; }
+		}
+
 		/// <inheritdoc/>
 		public ModuleDef Module {
 			get { return module; }
@@ -146,22 +127,82 @@ namespace dnlib.DotNet {
 		/// <summary>
 		/// From column TypeRef.ResolutionScope
 		/// </summary>
-		public abstract IResolutionScope ResolutionScope { get; set; }
+		public IResolutionScope ResolutionScope {
+			get {
+				if (!resolutionScope_isInitialized)
+					InitializeResolutionScope();
+				return resolutionScope;
+			}
+			set {
+#if THREAD_SAFE
+				theLock.EnterWriteLock(); try {
+#endif
+				resolutionScope = value;
+				resolutionScope_isInitialized = true;
+#if THREAD_SAFE
+				} finally { theLock.ExitWriteLock(); }
+#endif
+			}
+		}
+		/// <summary/>
+		protected IResolutionScope resolutionScope;
+		/// <summary/>
+		protected bool resolutionScope_isInitialized;
+
+		void InitializeResolutionScope() {
+#if THREAD_SAFE
+			theLock.EnterWriteLock(); try {
+#endif
+			if (resolutionScope_isInitialized)
+				return;
+			resolutionScope = GetResolutionScope_NoLock();
+			resolutionScope_isInitialized = true;
+#if THREAD_SAFE
+			} finally { theLock.ExitWriteLock(); }
+#endif
+		}
+
+		/// <summary>Called to initialize <see cref="resolutionScope"/></summary>
+		protected virtual IResolutionScope GetResolutionScope_NoLock() {
+			return null;
+		}
 
 		/// <summary>
 		/// From column TypeRef.Name
 		/// </summary>
-		public abstract UTF8String Name { get; set; }
+		public UTF8String Name {
+			get { return name; }
+			set { name = value; }
+		}
+		/// <summary>Name</summary>
+		protected UTF8String name;
 
 		/// <summary>
 		/// From column TypeRef.Namespace
 		/// </summary>
-		public abstract UTF8String Namespace { get; set; }
+		public UTF8String Namespace {
+			get { return @namespace; }
+			set { @namespace = value; }
+		}
+		/// <summary>Name</summary>
+		protected UTF8String @namespace;
 
 		/// <summary>
 		/// Gets all custom attributes
 		/// </summary>
-		public abstract CustomAttributeCollection CustomAttributes { get; }
+		public CustomAttributeCollection CustomAttributes {
+			get {
+				if (customAttributes == null)
+					InitializeCustomAttributes();
+				return customAttributes;
+			}
+		}
+		/// <summary/>
+		protected CustomAttributeCollection customAttributes;
+		/// <summary>Initializes <see cref="customAttributes"/></summary>
+		protected virtual void InitializeCustomAttributes() {
+			Interlocked.CompareExchange(ref customAttributes, new CustomAttributeCollection(), null);
+		}
 
 		/// <inheritdoc/>
 		public bool HasCustomAttributes {
@@ -183,6 +224,11 @@ namespace dnlib.DotNet {
 			}
 		}
 
+		/// <inheritdoc/>
+		public bool IsPrimitive {
+			get { return this.IsPrimitive(); }
+		}
+
 		/// <summary>
 		/// Gets the declaring type, if any
 		/// </summary>
@@ -190,14 +236,80 @@ namespace dnlib.DotNet {
 			get { return ResolutionScope as TypeRef; }
 		}
 
+		/// <inheritdoc/>
+		ITypeDefOrRef IMemberRef.DeclaringType {
+			get { return DeclaringType; }
+		}
+
+		bool IIsTypeOrMethod.IsType {
+			get { return true; }
+		}
+
+		bool IIsTypeOrMethod.IsMethod {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsField {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsTypeSpec {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsTypeRef {
+			get { return true; }
+		}
+
+		bool IMemberRef.IsTypeDef {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsMethodSpec {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsMethodDef {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsMemberRef {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsFieldDef {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsPropertyDef {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsEventDef {
+			get { return false; }
+		}
+
+		bool IMemberRef.IsGenericParam {
+			get { return false; }
+		}
+
 		/// <summary>
 		/// Resolves the type
 		/// </summary>
 		/// <returns>A <see cref="TypeDef"/> instance or <c>null</c> if it couldn't be resolved</returns>
 		public TypeDef Resolve() {
+			return Resolve(null);
+		}
+
+		/// <summary>
+		/// Resolves the type
+		/// </summary>
+		/// <param name="sourceModule">The module that needs to resolve the type or <c>null</c></param>
+		/// <returns>A <see cref="TypeDef"/> instance or <c>null</c> if it couldn't be resolved</returns>
+		public TypeDef Resolve(ModuleDef sourceModule) {
 			if (module == null)
 				return null;
-			return module.Context.Resolver.Resolve(this);
+			return module.Context.Resolver.Resolve(this, sourceModule);
 		}
 
 		/// <summary>
@@ -206,10 +318,20 @@ namespace dnlib.DotNet {
 		/// <returns>A <see cref="TypeDef"/> instance</returns>
 		/// <exception cref="TypeResolveException">If the type couldn't be resolved</exception>
 		public TypeDef ResolveThrow() {
-			var type = Resolve();
+			return ResolveThrow(null);
+		}
+
+		/// <summary>
+		/// Resolves the type
+		/// </summary>
+		/// <param name="sourceModule">The module that needs to resolve the type or <c>null</c></param>
+		/// <returns>A <see cref="TypeDef"/> instance</returns>
+		/// <exception cref="TypeResolveException">If the type couldn't be resolved</exception>
+		public TypeDef ResolveThrow(ModuleDef sourceModule) {
+			var type = Resolve(sourceModule);
 			if (type != null)
 				return type;
-			throw new TypeResolveException(string.Format("Could not resolve type: {0}", this));
+			throw new TypeResolveException(string.Format("Could not resolve type: {0} ({1})", this, DefinitionAssembly));
 		}
 
 		/// <summary>
@@ -239,34 +361,6 @@ namespace dnlib.DotNet {
 	/// A TypeRef row created by the user and not present in the original .NET file
 	/// </summary>
 	public class TypeRefUser : TypeRef {
-		IResolutionScope resolutionScope;
-		UTF8String name;
-		UTF8String @namespace;
-		readonly CustomAttributeCollection customAttributeCollection = new CustomAttributeCollection();
-
-		/// <inheritdoc/>
-		public override IResolutionScope ResolutionScope {
-			get { return resolutionScope; }
-			set { resolutionScope = value; }
-		}
-
-		/// <inheritdoc/>
-		public override UTF8String Name {
-			get { return name; }
-			set { name = value; }
-		}
-
-		/// <inheritdoc/>
-		public override UTF8String Namespace {
-			get { return @namespace; }
-			set { @namespace = value; }
-		}
-
-		/// <inheritdoc/>
-		public override CustomAttributeCollection CustomAttributes {
-			get { return customAttributeCollection; }
-		}
-
 		/// <summary>
 		/// Constructor
 		/// </summary>
@@ -297,6 +391,7 @@ namespace dnlib.DotNet {
 		public TypeRefUser(ModuleDef module, UTF8String @namespace, UTF8String name, IResolutionScope resolutionScope) {
 			this.module = module;
 			this.resolutionScope = resolutionScope;
+			this.resolutionScope_isInitialized = true;
 			this.name = name;
 			this.@namespace = @namespace;
 		}
@@ -308,17 +403,9 @@ namespace dnlib.DotNet {
 	sealed class TypeRefMD : TypeRef, IMDTokenProviderMD {
 		/// <summary>The module where this instance is located</summary>
 		readonly ModuleDefMD readerModule;
-		/// <summary>The raw table row. It's <c>null</c> until <see cref="InitializeRawRow_NoLock"/> is called</summary>
-		RawTypeRefRow rawRow;
 
 		readonly uint origRid;
-		UserValue<IResolutionScope> resolutionScope;
-		UserValue<UTF8String> name;
-		UserValue<UTF8String> @namespace;
-		CustomAttributeCollection customAttributeCollection;
-#if THREAD_SAFE
-		readonly Lock theLock = Lock.Create();
-#endif
+		readonly uint resolutionScopeCodedToken;
 
 		/// <inheritdoc/>
 		public uint OrigRid {
@@ -326,33 +413,15 @@ namespace dnlib.DotNet {
 		}
 
 		/// <inheritdoc/>
-		public override IResolutionScope ResolutionScope {
-			get { return resolutionScope.Value; }
-			set { resolutionScope.Value = value; }
+		protected override IResolutionScope GetResolutionScope_NoLock() {
+			return readerModule.ResolveResolutionScope(resolutionScopeCodedToken);
 		}
 
 		/// <inheritdoc/>
-		public override UTF8String Name {
-			get { return name.Value; }
-			set { name.Value = value; }
-		}
-
-		/// <inheritdoc/>
-		public override UTF8String Namespace {
-			get { return @namespace.Value; }
-			set { @namespace.Value = value; }
-		}
-
-		/// <inheritdoc/>
-		public override CustomAttributeCollection CustomAttributes {
-			get {
-				if (customAttributeCollection == null) {
-					var list = readerModule.MetaData.GetCustomAttributeRidList(Table.TypeRef, origRid);
-					var tmp = new CustomAttributeCollection((int)list.Length, list, (list2, index) => readerModule.ReadCustomAttribute(((RidList)list2)[index]));
-					Interlocked.CompareExchange(ref customAttributeCollection, tmp, null);
-				}
-				return customAttributeCollection;
-			}
+		protected override void InitializeCustomAttributes() {
+			var list = readerModule.MetaData.GetCustomAttributeRidList(Table.TypeRef, origRid);
+			var tmp = new CustomAttributeCollection((int)list.Length, list, (list2, index) => readerModule.ReadCustomAttribute(((RidList)list2)[index]));
+			Interlocked.CompareExchange(ref customAttributes, tmp, null);
 		}
 
 		/// <summary>
@@ -373,33 +442,11 @@ namespace dnlib.DotNet {
 			this.rid = rid;
 			this.readerModule = readerModule;
 			this.module = readerModule;
-			Initialize();
-		}
-
-		void Initialize() {
-			resolutionScope.ReadOriginalValue = () => {
-				InitializeRawRow_NoLock();
-				return readerModule.ResolveResolutionScope(rawRow.ResolutionScope);
-			};
-			name.ReadOriginalValue = () => {
-				InitializeRawRow_NoLock();
-				return readerModule.StringsStream.ReadNoNull(rawRow.Name);
-			};
-			@namespace.ReadOriginalValue = () => {
-				InitializeRawRow_NoLock();
-				return readerModule.StringsStream.ReadNoNull(rawRow.Namespace);
-			};
-#if THREAD_SAFE
-			resolutionScope.Lock = theLock;
-			name.Lock = theLock;
-			@namespace.Lock = theLock;
-#endif
-		}
-
-		void InitializeRawRow_NoLock() {
-			if (rawRow != null)
-				return;
-			rawRow = readerModule.TablesStream.ReadTypeRefRow(origRid);
+			uint resolutionScope, name;
+			uint @namespace = readerModule.TablesStream.ReadTypeRefRow(origRid, out resolutionScope, out name);
+			this.name = readerModule.StringsStream.ReadNoNull(name);
+			this.@namespace = readerModule.StringsStream.ReadNoNull(@namespace);
+			this.resolutionScopeCodedToken = resolutionScope;
 		}
 	}
 }

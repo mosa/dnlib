@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -168,6 +147,15 @@ namespace dnlib.DotNet.Writer {
 		/// IMAGE_OPTIONAL_HEADER.NumberOfRvaAndSizes value
 		/// </summary>
 		public uint? NumberOfRvaAndSizes;
+
+		/// <summary>
+		/// Creates a new time date stamp using current time
+		/// </summary>
+		/// <returns>A new time date stamp</returns>
+		public static uint CreateNewTimeDateStamp() {
+			return (uint)(DateTime.UtcNow - Epoch).TotalSeconds;
+		}
+		static readonly DateTime Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 	}
 
 	/// <summary>
@@ -182,7 +170,6 @@ namespace dnlib.DotNet.Writer {
 		readonly uint sectionAlignment;
 		readonly uint fileAlignment;
 		ulong imageBase;
-		static readonly DateTime Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 		long startOffset;
 		long checkSumOffset;
 		bool isExeFile;
@@ -236,6 +223,11 @@ namespace dnlib.DotNet.Writer {
 		/// Gets/sets the relocation directory
 		/// </summary>
 		public RelocDirectory RelocDirectory { get; set; }
+
+		/// <summary>
+		/// Gets/sets the debug directory
+		/// </summary>
+		public DebugDirectory DebugDirectory { get; set; }
 
 		/// <summary>
 		/// Gets the image base
@@ -345,7 +337,7 @@ namespace dnlib.DotNet.Writer {
 			// Image file header
 			writer.Write((ushort)GetMachine());
 			writer.Write((ushort)sections.Count);
-			writer.Write(options.TimeDateStamp ?? (uint)(DateTime.UtcNow - Epoch).TotalSeconds);
+			writer.Write(options.TimeDateStamp ?? PEHeadersOptions.CreateNewTimeDateStamp());
 			writer.Write(0);
 			writer.Write(0);
 			writer.Write((ushort)(Use32BitOptionalHeader() ? 0xE0U : 0xF0));
@@ -427,7 +419,7 @@ namespace dnlib.DotNet.Writer {
 			writer.WriteDataDirectory(null);	// Exception table
 			writer.WriteDataDirectory(null);	// Certificate table
 			writer.WriteDataDirectory(RelocDirectory);
-			writer.WriteDataDirectory(null);	// Debugging information
+			writer.WriteDataDirectory(DebugDirectory, DebugDirectory.HEADER_SIZE);
 			writer.WriteDataDirectory(null);	// Architecture-specific data
 			writer.WriteDataDirectory(null);	// Global pointer register RVA
 			writer.WriteDataDirectory(null);	// Thread local storage
@@ -462,7 +454,7 @@ namespace dnlib.DotNet.Writer {
 
 		bool Use32BitOptionalHeader() {
 			var mach = GetMachine();
-			return mach != Machine.IA64 && mach != Machine.AMD64;
+			return mach != Machine.IA64 && mach != Machine.AMD64 && mach != Machine.ARM64;
 		}
 
 		Characteristics GetCharacteristics() {

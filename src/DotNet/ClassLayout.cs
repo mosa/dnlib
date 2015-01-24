@@ -1,30 +1,8 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using dnlib.Utils;
 using dnlib.DotNet.MD;
-using dnlib.Threading;
 
 namespace dnlib.DotNet {
 	/// <summary>
@@ -50,33 +28,28 @@ namespace dnlib.DotNet {
 		/// <summary>
 		/// From column ClassLayout.PackingSize
 		/// </summary>
-		public abstract ushort PackingSize { get; set; }
+		public ushort PackingSize {
+			get { return packingSize; }
+			set { packingSize = value; }
+		}
+		/// <summary/>
+		protected ushort packingSize;
 
 		/// <summary>
 		/// From column ClassLayout.ClassSize
 		/// </summary>
-		public abstract uint ClassSize { get; set; }
+		public uint ClassSize {
+			get { return classSize; }
+			set { classSize = value; }
+		}
+		/// <summary/>
+		protected uint classSize;
 	}
 
 	/// <summary>
 	/// A ClassLayout row created by the user and not present in the original .NET file
 	/// </summary>
 	public class ClassLayoutUser : ClassLayout {
-		ushort packingSize;
-		uint classSize;
-
-		/// <inheritdoc/>
-		public override ushort PackingSize {
-			get { return packingSize; }
-			set { packingSize = value; }
-		}
-
-		/// <inheritdoc/>
-		public override uint ClassSize {
-			get { return classSize; }
-			set { classSize = value; }
-		}
-
 		/// <summary>
 		/// Default constructor
 		/// </summary>
@@ -100,31 +73,12 @@ namespace dnlib.DotNet {
 	sealed class ClassLayoutMD : ClassLayout, IMDTokenProviderMD {
 		/// <summary>The module where this instance is located</summary>
 		readonly ModuleDefMD readerModule;
-		/// <summary>The raw table row. It's <c>null</c> until <see cref="InitializeRawRow_NoLock"/> is called</summary>
-		RawClassLayoutRow rawRow;
 
 		readonly uint origRid;
-		UserValue<ushort> packingSize;
-		UserValue<uint> classSize;
-#if THREAD_SAFE
-		readonly Lock theLock = Lock.Create();
-#endif
 
 		/// <inheritdoc/>
 		public uint OrigRid {
 			get { return origRid; }
-		}
-
-		/// <inheritdoc/>
-		public override ushort PackingSize {
-			get { return packingSize.Value; }
-			set { packingSize.Value = value; }
-		}
-
-		/// <inheritdoc/>
-		public override uint ClassSize {
-			get { return classSize.Value; }
-			set { classSize.Value = value; }
 		}
 
 		/// <summary>
@@ -144,28 +98,7 @@ namespace dnlib.DotNet {
 			this.origRid = rid;
 			this.rid = rid;
 			this.readerModule = readerModule;
-			Initialize();
-		}
-
-		void Initialize() {
-			packingSize.ReadOriginalValue = () => {
-				InitializeRawRow_NoLock();
-				return rawRow.PackingSize;
-			};
-			classSize.ReadOriginalValue = () => {
-				InitializeRawRow_NoLock();
-				return rawRow.ClassSize;
-			};
-#if THREAD_SAFE
-			packingSize.Lock = theLock;
-			classSize.Lock = theLock;
-#endif
-		}
-
-		void InitializeRawRow_NoLock() {
-			if (rawRow != null)
-				return;
-			rawRow = readerModule.TablesStream.ReadClassLayoutRow(origRid);
+			this.classSize = readerModule.TablesStream.ReadClassLayoutRow(origRid, out this.packingSize);
 		}
 	}
 }

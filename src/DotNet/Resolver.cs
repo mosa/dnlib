@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 using System;
 using System.Collections.Generic;
@@ -43,7 +22,7 @@ using dnlib.Threading;
 		}
 
 		/// <inheritdoc/>
-		public TypeDef Resolve(TypeRef typeRef) {
+		public TypeDef Resolve(TypeRef typeRef, ModuleDef sourceModule) {
 			if (typeRef == null)
 				return null;
 
@@ -55,14 +34,14 @@ using dnlib.Threading;
 			var nonNestedModule = nonNestedTypeRef.Module;
 			var asmRef = nonNestedResolutionScope as AssemblyRef;
 			if (asmRef != null) {
-				var asm = assemblyResolver.Resolve(asmRef, nonNestedModule);
-				return asm == null ? null : asm.Find(typeRef) ?? ResolveExportedType(asm.Modules, typeRef);
+				var asm = assemblyResolver.Resolve(asmRef, sourceModule ?? nonNestedModule);
+				return asm == null ? null : asm.Find(typeRef) ?? ResolveExportedType(asm.Modules, typeRef, sourceModule);
 			}
 
 			var moduleDef = nonNestedResolutionScope as ModuleDef;
 			if (moduleDef != null)
 				return moduleDef.Find(typeRef) ??
-					ResolveExportedType(new ModuleDef[] { moduleDef }, typeRef);
+					ResolveExportedType(new ModuleDef[] { moduleDef }, typeRef, sourceModule);
 
 			var moduleRef = nonNestedResolutionScope as ModuleRef;
 			if (moduleRef != null) {
@@ -70,25 +49,25 @@ using dnlib.Threading;
 					return null;
 				if (new SigComparer().Equals(moduleRef, nonNestedModule))
 					return nonNestedModule.Find(typeRef) ??
-						ResolveExportedType(new ModuleDef[] { nonNestedModule }, typeRef);
+						ResolveExportedType(new ModuleDef[] { nonNestedModule }, typeRef, sourceModule);
 				var nonNestedAssembly = nonNestedModule.Assembly;
 				if (nonNestedAssembly == null)
 					return null;
 				var resolvedModule = nonNestedAssembly.FindModule(moduleRef.Name);
 				return resolvedModule == null ? null : resolvedModule.Find(typeRef) ??
-						ResolveExportedType(new ModuleDef[] { resolvedModule }, typeRef);
+						ResolveExportedType(new ModuleDef[] { resolvedModule }, typeRef, sourceModule);
 			}
 
 			return null;
 		}
 
-		TypeDef ResolveExportedType(IList<ModuleDef> modules, TypeRef typeRef) {
+		TypeDef ResolveExportedType(IList<ModuleDef> modules, TypeRef typeRef, ModuleDef sourceModule) {
 			var exportedType = FindExportedType(modules, typeRef);
 			if (exportedType == null)
 				return null;
 
 			var asmResolver = modules[0].Context.AssemblyResolver;
-			var etAsm = asmResolver.Resolve(exportedType.DefinitionAssembly, typeRef.Module);
+			var etAsm = asmResolver.Resolve(exportedType.DefinitionAssembly, sourceModule ?? typeRef.Module);
 			if (etAsm == null)
 				return null;
 
@@ -100,8 +79,6 @@ using dnlib.Threading;
 				return null;
 			foreach (var module in modules.GetSafeEnumerable()) {
 				foreach (var exportedType in module.ExportedTypes.GetSafeEnumerable()) {
-					if (!exportedType.IsForwarder)
-						continue;
 					if (new SigComparer(SigComparerOptions.DontCompareTypeScope).Equals(exportedType, typeRef))
 						return exportedType;
 				}
@@ -131,7 +108,7 @@ using dnlib.Threading;
 
 			var declaringTypeRef = parent as TypeRef;
 			if (declaringTypeRef != null)
-				return Resolve(declaringTypeRef);
+				return Resolve(declaringTypeRef, memberRef.Module);
 
 			// A module ref is used to reference the global type of a module in the same
 			// assembly as the current module.
@@ -141,7 +118,7 @@ using dnlib.Threading;
 				if (module == null)
 					return null;
 				TypeDef globalType = null;
-				if (new SigComparer(0).Equals(module, moduleRef))
+				if (new SigComparer().Equals(module, moduleRef))
 					globalType = module.GlobalType;
 				var modAsm = module.Assembly;
 				if (globalType == null && modAsm != null) {
@@ -165,7 +142,7 @@ using dnlib.Threading;
 						return td;
 					var tr = git.GenericType.TypeRef;
 					if (tr != null)
-						return Resolve(tr);
+						return Resolve(tr, memberRef.Module);
 				}
 				return null;
 			}

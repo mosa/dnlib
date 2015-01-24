@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -256,7 +235,7 @@ namespace dnlib.DotNet.Writer {
 			uint rid;
 			if (typeToRid.TryGetValue(td, out rid))
 				return rid;
-			Error("TypeDef {0} ({1:X8}) is not defined in this module ({2})", td, td.MDToken.Raw, module);
+			Error("TypeDef {0} ({1:X8}) is not defined in this module ({2}). A type was removed that is still referenced by this module.", td, td.MDToken.Raw, module);
 			return 0;
 		}
 
@@ -268,7 +247,7 @@ namespace dnlib.DotNet.Writer {
 			if (fd == null)
 				Error("Field is null");
 			else
-				Error("Field {0} ({1:X8}) is not defined in this module ({2})", fd, fd.MDToken.Raw, module);
+				Error("Field {0} ({1:X8}) is not defined in this module ({2}). A field was removed that is still referenced by this module.", fd, fd.MDToken.Raw, module);
 			return 0;
 		}
 
@@ -280,7 +259,7 @@ namespace dnlib.DotNet.Writer {
 			if (md == null)
 				Error("Method is null");
 			else
-				Error("Method {0} ({1:X8}) is not defined in this module ({2})", md, md.MDToken.Raw, module);
+				Error("Method {0} ({1:X8}) is not defined in this module ({2}). A method was removed that is still referenced by this module.", md, md.MDToken.Raw, module);
 			return 0;
 		}
 
@@ -292,7 +271,7 @@ namespace dnlib.DotNet.Writer {
 			if (pd == null)
 				Error("Param is null");
 			else
-				Error("Param {0} ({1:X8}) is not defined in this module ({2})", pd, pd.MDToken.Raw, module);
+				Error("Param {0} ({1:X8}) is not defined in this module ({2}). A parameter was removed that is still referenced by this module.", pd, pd.MDToken.Raw, module);
 			return 0;
 		}
 
@@ -318,7 +297,7 @@ namespace dnlib.DotNet.Writer {
 			if (ed == null)
 				Error("Event is null");
 			else
-				Error("Event {0} ({1:X8}) is not defined in this module ({2})", ed, ed.MDToken.Raw, module);
+				Error("Event {0} ({1:X8}) is not defined in this module ({2}). An event was removed that is still referenced by this module.", ed, ed.MDToken.Raw, module);
 			return 0;
 		}
 
@@ -330,7 +309,7 @@ namespace dnlib.DotNet.Writer {
 			if (pd == null)
 				Error("Property is null");
 			else
-				Error("Property {0} ({1:X8}) is not defined in this module ({2})", pd, pd.MDToken.Raw, module);
+				Error("Property {0} ({1:X8}) is not defined in this module ({2}). A property was removed that is still referenced by this module.", pd, pd.MDToken.Raw, module);
 			return 0;
 		}
 
@@ -535,7 +514,7 @@ namespace dnlib.DotNet.Writer {
 
 			uint rows = mod.TablesStream.MemberRefTable.Rows;
 			for (uint rid = 1; rid <= rows; rid++)
-				AddMemberRef(mod.ResolveMemberRef(rid));
+				AddMemberRef(mod.ResolveMemberRef(rid), true);
 			tablesHeap.MemberRefTable.ReAddRows();
 		}
 
@@ -547,7 +526,7 @@ namespace dnlib.DotNet.Writer {
 
 			uint rows = mod.TablesStream.StandAloneSigTable.Rows;
 			for (uint rid = 1; rid <= rows; rid++)
-				AddStandAloneSig(mod.ResolveStandAloneSig(rid));
+				AddStandAloneSig(mod.ResolveStandAloneSig(rid), true);
 			tablesHeap.StandAloneSigTable.ReAddRows();
 		}
 
@@ -559,7 +538,7 @@ namespace dnlib.DotNet.Writer {
 
 			uint rows = mod.TablesStream.TypeSpecTable.Rows;
 			for (uint rid = 1; rid <= rows; rid++)
-				AddTypeSpec(mod.ResolveTypeSpec(rid));
+				AddTypeSpec(mod.ResolveTypeSpec(rid), true);
 			tablesHeap.TypeSpecTable.ReAddRows();
 		}
 
@@ -571,7 +550,7 @@ namespace dnlib.DotNet.Writer {
 
 			uint rows = mod.TablesStream.MethodSpecTable.Rows;
 			for (uint rid = 1; rid <= rows; rid++)
-				AddMethodSpec(mod.ResolveMethodSpec(rid));
+				AddMethodSpec(mod.ResolveMethodSpec(rid), true);
 			tablesHeap.MethodSpecTable.ReAddRows();
 		}
 
@@ -1082,6 +1061,10 @@ namespace dnlib.DotNet.Writer {
 
 		/// <inheritdoc/>
 		protected override uint AddTypeSpec(TypeSpec ts) {
+			return AddTypeSpec(ts, false);
+		}
+
+		uint AddTypeSpec(TypeSpec ts, bool forceIsOld) {
 			if (ts == null) {
 				Error("TypeSpec is null");
 				return 0;
@@ -1094,7 +1077,7 @@ namespace dnlib.DotNet.Writer {
 			}
 			typeSpecInfos.Add(ts, 0);	// Prevent inf recursion
 
-			bool isOld = PreserveTypeSpecRids && mod.ResolveTypeSpec(ts.Rid) == ts;
+			bool isOld = forceIsOld || (PreserveTypeSpecRids && mod.ResolveTypeSpec(ts.Rid) == ts);
 			var row = isOld ? tablesHeap.TypeSpecTable[ts.Rid] : new RawTypeSpecRow();
 			row.Signature = GetSignature(ts.TypeSig, ts.ExtraData);
 
@@ -1106,6 +1089,10 @@ namespace dnlib.DotNet.Writer {
 
 		/// <inheritdoc/>
 		protected override uint AddMemberRef(MemberRef mr) {
+			return AddMemberRef(mr, false);
+		}
+
+		uint AddMemberRef(MemberRef mr, bool forceIsOld) {
 			if (mr == null) {
 				Error("MemberRef is null");
 				return 0;
@@ -1114,7 +1101,7 @@ namespace dnlib.DotNet.Writer {
 			if (memberRefInfos.TryGetRid(mr, out rid))
 				return rid;
 
-			bool isOld = PreserveMemberRefRids && mod.ResolveMemberRef(mr.Rid) == mr;
+			bool isOld = forceIsOld || (PreserveMemberRefRids && mod.ResolveMemberRef(mr.Rid) == mr);
 			var row = isOld ? tablesHeap.MemberRefTable[mr.Rid] : new RawMemberRefRow();
 			row.Class = AddMemberRefParent(mr.Class);
 			row.Name = stringsHeap.Add(mr.Name);
@@ -1128,6 +1115,10 @@ namespace dnlib.DotNet.Writer {
 
 		/// <inheritdoc/>
 		protected override uint AddStandAloneSig(StandAloneSig sas) {
+			return AddStandAloneSig(sas, false);
+		}
+
+		uint AddStandAloneSig(StandAloneSig sas, bool forceIsOld) {
 			if (sas == null) {
 				Error("StandAloneSig is null");
 				return 0;
@@ -1136,7 +1127,7 @@ namespace dnlib.DotNet.Writer {
 			if (standAloneSigInfos.TryGetRid(sas, out rid))
 				return rid;
 
-			bool isOld = PreserveStandAloneSigRids && mod.ResolveStandAloneSig(sas.Rid) == sas;
+			bool isOld = forceIsOld || (PreserveStandAloneSigRids && mod.ResolveStandAloneSig(sas.Rid) == sas);
 			var row = isOld ? tablesHeap.StandAloneSigTable[sas.Rid] : new RawStandAloneSigRow();
 			row.Signature = GetSignature(sas.Signature);
 
@@ -1189,7 +1180,7 @@ namespace dnlib.DotNet.Writer {
 			var oldSig = sas.Signature;
 			try {
 				sas.Signature = callConvSig;
-				AddStandAloneSig(sas);
+				AddStandAloneSig(sas, true);
 			}
 			finally {
 				sas.Signature = oldSig;
@@ -1208,6 +1199,10 @@ namespace dnlib.DotNet.Writer {
 
 		/// <inheritdoc/>
 		protected override uint AddMethodSpec(MethodSpec ms) {
+			return AddMethodSpec(ms, false);
+		}
+
+		uint AddMethodSpec(MethodSpec ms, bool forceIsOld) {
 			if (ms == null) {
 				Error("MethodSpec is null");
 				return 0;
@@ -1216,7 +1211,7 @@ namespace dnlib.DotNet.Writer {
 			if (methodSpecInfos.TryGetRid(ms, out rid))
 				return rid;
 
-			bool isOld = PreserveMethodSpecRids && mod.ResolveMethodSpec(ms.Rid) == ms;
+			bool isOld = forceIsOld || (PreserveMethodSpecRids && mod.ResolveMethodSpec(ms.Rid) == ms);
 			var row = isOld ? tablesHeap.MethodSpecTable[ms.Rid] : new RawMethodSpecRow();
 			row.Method = AddMethodDefOrRef(ms.Method);
 			row.Instantiation = GetSignature(ms.Instantiation);

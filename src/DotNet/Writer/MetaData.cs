@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -632,6 +611,19 @@ namespace dnlib.DotNet.Writer {
 		}
 
 		/// <summary>
+		/// Gets/sets the <see cref="MetaDataFlags.PreserveExtraSignatureData"/> bit
+		/// </summary>
+		public bool PreserveExtraSignatureData {
+			get { return (options.Flags & MetaDataFlags.PreserveExtraSignatureData) != 0; }
+			set {
+				if (value)
+					options.Flags |= MetaDataFlags.PreserveExtraSignatureData;
+				else
+					options.Flags &= ~MetaDataFlags.PreserveExtraSignatureData;
+			}
+		}
+
+		/// <summary>
 		/// Gets/sets the <see cref="MetaDataFlags.KeepOldMaxStack"/> bit
 		/// </summary>
 		public bool KeepOldMaxStack {
@@ -1058,6 +1050,16 @@ namespace dnlib.DotNet.Writer {
 		}
 
 		/// <summary>
+		/// Gets a method's local variable signature token
+		/// </summary>
+		/// <param name="md">Method</param>
+		/// <returns>Locals sig token or <c>0</c></returns>
+		public uint GetLocalVarSigToken(MethodDef md) {
+			var mb = GetMethodBody(md);
+			return mb == null ? 0 : mb.LocalVarSigTok;
+		}
+
+		/// <summary>
 		/// Gets the <see cref="ByteArrayChunk"/> where the resource data will be stored
 		/// </summary>
 		/// <param name="er">Embedded resource</param>
@@ -1184,13 +1186,13 @@ namespace dnlib.DotNet.Writer {
 			WriteTypeDefAndMemberDefCustomAttributes();
 			Listener.OnMetaDataEvent(this, MetaDataEvent.MemberDefCustomAttributesWritten);
 
-			Listener.OnMetaDataEvent(this, MetaDataEvent.BeginWriteMethodBodies);
-			WriteMethodBodies();
-			Listener.OnMetaDataEvent(this, MetaDataEvent.EndWriteMethodBodies);
-
 			Listener.OnMetaDataEvent(this, MetaDataEvent.BeginAddResources);
 			AddResources(module.Resources);
 			Listener.OnMetaDataEvent(this, MetaDataEvent.EndAddResources);
+
+			Listener.OnMetaDataEvent(this, MetaDataEvent.BeginWriteMethodBodies);
+			WriteMethodBodies();
+			Listener.OnMetaDataEvent(this, MetaDataEvent.EndWriteMethodBodies);
 
 			BeforeSortingCustomAttributes();
 			InitializeCustomAttributeTable();
@@ -1226,7 +1228,7 @@ namespace dnlib.DotNet.Writer {
 
 				foreach (var field in type.Fields) {
 					if (field == null) {
-						Error("Field is null");
+						Error("Field is null. TypeDef {0} ({1:X8})", type, type.MDToken.Raw);
 						continue;
 					}
 					uint rid = GetRid(field);
@@ -1243,7 +1245,7 @@ namespace dnlib.DotNet.Writer {
 
 				foreach (var method in type.Methods) {
 					if (method == null) {
-						Error("Method is null");
+						Error("Method is null. TypeDef {0} ({1:X8})", type, type.MDToken.Raw);
 						continue;
 					}
 					uint rid = GetRid(method);
@@ -1258,7 +1260,7 @@ namespace dnlib.DotNet.Writer {
 					AddMethodImpls(method, method.Overrides);
 					foreach (var pd in method.ParamDefs) {
 						if (pd == null) {
-							Error("Param is null");
+							Error("Param is null. Method {0} ({1:X8})", method, method.MDToken.Raw);
 							continue;
 						}
 						uint pdRid = GetRid(pd);
@@ -1274,7 +1276,7 @@ namespace dnlib.DotNet.Writer {
 				if (!IsEmpty(type.Events)) {
 					foreach (var evt in type.Events) {
 						if (evt == null) {
-							Error("Event is null");
+							Error("Event is null. TypeDef {0} ({1:X8})", type, type.MDToken.Raw);
 							continue;
 						}
 						uint rid = GetRid(evt);
@@ -1289,7 +1291,7 @@ namespace dnlib.DotNet.Writer {
 				if (!IsEmpty(type.Properties)) {
 					foreach (var prop in type.Properties) {
 						if (prop == null) {
-							Error("Property is null");
+							Error("Property is null. TypeDef {0} ({1:X8})", type, type.MDToken.Raw);
 							continue;
 						}
 						uint rid = GetRid(prop);
@@ -1493,9 +1495,9 @@ namespace dnlib.DotNet.Writer {
 					if (cilBody != null) {
 						if (cilBody.Instructions.Count == 0 && cilBody.Variables.Count == 0)
 							continue;
-						var writer = new MethodBodyWriter(this, cilBody, keepMaxStack);
+						var writer = new MethodBodyWriter(this, cilBody, keepMaxStack || cilBody.KeepOldMaxStack);
 						writer.Write();
-						var mb = methodBodies.Add(new MethodBody(writer.Code, writer.ExtraSections));
+						var mb = methodBodies.Add(new MethodBody(writer.Code, writer.ExtraSections, writer.LocalVarSigTok));
 						methodToBody[method] = mb;
 						continue;
 					}
@@ -1567,7 +1569,7 @@ namespace dnlib.DotNet.Writer {
 		/// <returns>Its new rid</returns>
 		protected virtual uint AddStandAloneSig(MethodSig methodSig, uint origToken) {
 			if (methodSig == null) {
-				Error("MethodSig is null");
+				Error("StandAloneSig: MethodSig is null");
 				return 0;
 			}
 
@@ -2184,7 +2186,7 @@ namespace dnlib.DotNet.Writer {
 
 		void VerifyConstantType(ElementType realType, ElementType expectedType) {
 			if (realType != expectedType)
-				Error("Constant value's type is the wrong type");
+				Error("Constant value's type is the wrong type: {0} != {1}", realType, expectedType);
 		}
 
 		/// <summary>
@@ -2226,7 +2228,7 @@ namespace dnlib.DotNet.Writer {
 			AddMethodSemantics(token, evt.AddMethod, MethodSemanticsAttributes.AddOn);
 			AddMethodSemantics(token, evt.RemoveMethod, MethodSemanticsAttributes.RemoveOn);
 			AddMethodSemantics(token, evt.InvokeMethod, MethodSemanticsAttributes.Fire);
-			AddMethodSemantics(token, evt.OtherMethods);
+			AddMethodSemantics(token, evt.OtherMethods, MethodSemanticsAttributes.Other);
 		}
 
 		/// <summary>
@@ -2242,16 +2244,16 @@ namespace dnlib.DotNet.Writer {
 			if (rid == 0)
 				return;
 			var token = new MDToken(Table.Property, rid);
-			AddMethodSemantics(token, prop.GetMethod, MethodSemanticsAttributes.Getter);
-			AddMethodSemantics(token, prop.SetMethod, MethodSemanticsAttributes.Setter);
-			AddMethodSemantics(token, prop.OtherMethods);
+			AddMethodSemantics(token, prop.GetMethods, MethodSemanticsAttributes.Getter);
+			AddMethodSemantics(token, prop.SetMethods, MethodSemanticsAttributes.Setter);
+			AddMethodSemantics(token, prop.OtherMethods, MethodSemanticsAttributes.Other);
 		}
 
-		void AddMethodSemantics(MDToken owner, IList<MethodDef> otherMethods) {
-			if (otherMethods == null)
+		void AddMethodSemantics(MDToken owner, IList<MethodDef> methods, MethodSemanticsAttributes attrs) {
+			if (methods == null)
 				return;
-			foreach (var method in otherMethods)
-				AddMethodSemantics(owner, method, MethodSemanticsAttributes.Other);
+			foreach (var method in methods)
+				AddMethodSemantics(owner, method, attrs);
 		}
 
 		void AddMethodSemantics(MDToken owner, MethodDef method, MethodSemanticsAttributes flags) {
@@ -2273,7 +2275,7 @@ namespace dnlib.DotNet.Writer {
 			if (overrides == null)
 				return;
 			if (method.DeclaringType == null) {
-				Error("Method declaring type == null");
+				Error("Method declaring type == null. Method {0} ({1:X8})", method, method.MDToken.Raw);
 				return;
 			}
 			uint rid = GetRid(method.DeclaringType);
@@ -2436,7 +2438,8 @@ namespace dnlib.DotNet.Writer {
 		/// Gets a #Blob offset of a type signature
 		/// </summary>
 		/// <param name="ts">Type sig</param>
-		/// <param name="extraData">Extra data to append the signature</param>
+		/// <param name="extraData">Extra data to append the signature if
+		/// <see cref="PreserveExtraSignatureData"/> is <c>true</c>.</param>
 		/// <returns>#Blob offset</returns>
 		protected uint GetSignature(TypeSig ts, byte[] extraData) {
 			byte[] blob;
@@ -2467,7 +2470,7 @@ namespace dnlib.DotNet.Writer {
 		}
 
 		void AppendExtraData(ref byte[] blob, byte[] extraData) {
-			if (extraData != null && extraData.Length > 0) {
+			if (PreserveExtraSignatureData && extraData != null && extraData.Length > 0) {
 				int blen = blob == null ? 0 : blob.Length;
 				Array.Resize(ref blob, blen + extraData.Length);
 				Array.Copy(extraData, 0, blob, blen, extraData.Length);

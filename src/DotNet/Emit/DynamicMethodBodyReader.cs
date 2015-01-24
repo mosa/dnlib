@@ -1,25 +1,4 @@
-﻿/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+﻿// dnlib: See LICENSE.txt for more info
 
 using System;
 using System.Collections.Generic;
@@ -63,6 +42,7 @@ namespace dnlib.DotNet.Emit {
 
 		readonly ModuleDef module;
 		readonly Importer importer;
+		readonly GenericParamContext gpContext;
 		readonly MethodDef method;
 		readonly int codeSize;
 		readonly int maxStack;
@@ -116,9 +96,22 @@ namespace dnlib.DotNet.Emit {
 		/// <param name="obj">This can be one of several supported types: the delegate instance
 		/// created by DynamicMethod.CreateDelegate(), a DynamicMethod instance, a RTDynamicMethod
 		/// instance or a DynamicResolver instance.</param>
-		public DynamicMethodBodyReader(ModuleDef module, object obj) {
+		public DynamicMethodBodyReader(ModuleDef module, object obj)
+			: this(module, obj, new GenericParamContext()) {
+		}
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="module">Module that will own the method body</param>
+		/// <param name="obj">This can be one of several supported types: the delegate instance
+		/// created by DynamicMethod.CreateDelegate(), a DynamicMethod instance, a RTDynamicMethod
+		/// instance or a DynamicResolver instance.</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		public DynamicMethodBodyReader(ModuleDef module, object obj, GenericParamContext gpContext) {
 			this.module = module;
-			this.importer = new Importer(module, ImporterOptions.TryToUseDefs);
+			this.importer = new Importer(module, ImporterOptions.TryToUseDefs, gpContext);
+			this.gpContext = gpContext;
 
 			if (obj == null)
 				throw new ArgumentNullException("obj");
@@ -211,7 +204,7 @@ namespace dnlib.DotNet.Emit {
 			if (localsSig == null || localsSig.Length == 0)
 				return;
 
-			var sig = SignatureReader.ReadSig(this, module.CorLibTypes, localsSig) as LocalSig;
+			var sig = SignatureReader.ReadSig(this, module.CorLibTypes, localsSig, gpContext) as LocalSig;
 			if (sig == null)
 				return;
 
@@ -476,7 +469,7 @@ namespace dnlib.DotNet.Emit {
 			if (sig == null)
 				return null;
 
-			return SignatureReader.ReadSig(this, module.CorLibTypes, sig);
+			return SignatureReader.ReadSig(this, module.CorLibTypes, sig, gpContext);
 		}
 
 		object Resolve(uint index) {
@@ -485,7 +478,7 @@ namespace dnlib.DotNet.Emit {
 			return tokens[(int)index];
 		}
 
-		ITypeDefOrRef ISignatureReaderHelper.ResolveTypeDefOrRef(uint codedToken) {
+		ITypeDefOrRef ISignatureReaderHelper.ResolveTypeDefOrRef(uint codedToken, GenericParamContext gpContext) {
 			uint token;
 			if (!CodedToken.TypeDefOrRef.Decode(codedToken, out token))
 				return null;
@@ -499,7 +492,7 @@ namespace dnlib.DotNet.Emit {
 			return null;
 		}
 
-		unsafe TypeSig ISignatureReaderHelper.ConvertRTInternalAddress(IntPtr address) {
+		TypeSig ISignatureReaderHelper.ConvertRTInternalAddress(IntPtr address) {
 			return importer.ImportAsTypeSig(MethodTableToTypeConverter.Convert(address));
 		}
 	}

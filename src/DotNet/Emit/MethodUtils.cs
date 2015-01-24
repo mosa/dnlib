@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System.Collections.Generic;
 using dnlib.Threading;
@@ -38,7 +17,7 @@ namespace dnlib.DotNet.Emit {
 		/// <param name="parameters">All method parameters, including the hidden 'this' parameter
 		/// if it's an instance method. Use <see cref="MethodDef.Parameters"/>.</param>
 		public static void SimplifyMacros(this IList<Instruction> instructions, IList<Local> locals, IList<Parameter> parameters) {
-			instructions.IterateAll((list, index, instr) => {
+			foreach (var instr in instructions.GetSafeEnumerable()) {
 				switch (instr.OpCode.Code) {
 				case Code.Beq_S:
 					instr.OpCode = OpCodes.Beq;
@@ -235,7 +214,7 @@ namespace dnlib.DotNet.Emit {
 					instr.OpCode = OpCodes.Stloc;
 					break;
 				}
-			});
+			}
 		}
 
 		static T ReadList<T>(IList<T> list, int index) {
@@ -250,7 +229,7 @@ namespace dnlib.DotNet.Emit {
 		/// </summary>
 		/// <param name="instructions">All instructions</param>
 		public static void OptimizeMacros(this IList<Instruction> instructions) {
-			instructions.IterateAll((list, index, instr) => {
+			foreach (var instr in instructions.GetSafeEnumerable()) {
 				Parameter arg;
 				Local local;
 				switch (instr.OpCode.Code) {
@@ -414,7 +393,7 @@ namespace dnlib.DotNet.Emit {
 						instr.OpCode = OpCodes.Stloc_S;
 					break;
 				}
-			});
+			}
 
 			OptimizeBranches(instructions);
 		}
@@ -425,7 +404,7 @@ namespace dnlib.DotNet.Emit {
 		/// </summary>
 		/// <param name="instructions">All instructions</param>
 		public static void SimplifyBranches(this IList<Instruction> instructions) {
-			instructions.IterateAll((list, index, instr) => {
+			foreach (var instr in instructions.GetSafeEnumerable()) {
 				switch (instr.OpCode.Code) {
 				case Code.Beq_S:	instr.OpCode = OpCodes.Beq; break;
 				case Code.Bge_S:	instr.OpCode = OpCodes.Bge; break;
@@ -442,7 +421,7 @@ namespace dnlib.DotNet.Emit {
 				case Code.Brtrue_S:	instr.OpCode = OpCodes.Brtrue; break;
 				case Code.Leave_S:	instr.OpCode = OpCodes.Leave; break;
 				}
-			});
+			}
 		}
 
 		/// <summary>
@@ -454,7 +433,7 @@ namespace dnlib.DotNet.Emit {
 				UpdateInstructionOffsets(instructions);
 
 				bool modified = false;
-				instructions.IterateAll((list, index, instr) => {
+				foreach (var instr in instructions.GetSafeEnumerable()) {
 					OpCode shortOpCode;
 					switch (instr.OpCode.Code) {
 					case Code.Beq:		shortOpCode = OpCodes.Beq_S; break;
@@ -471,11 +450,11 @@ namespace dnlib.DotNet.Emit {
 					case Code.Brfalse:	shortOpCode = OpCodes.Brfalse_S; break;
 					case Code.Brtrue:	shortOpCode = OpCodes.Brtrue_S; break;
 					case Code.Leave:	shortOpCode = OpCodes.Leave_S; break;
-					default: return;
+					default: continue;
 					}
 					var targetInstr = instr.Operand as Instruction;
 					if (targetInstr == null)
-						return;
+						continue;
 
 					int afterShortInstr;
 					if (targetInstr.Offset >= instr.Offset) {
@@ -495,7 +474,7 @@ namespace dnlib.DotNet.Emit {
 						instr.OpCode = shortOpCode;
 						modified = true;
 					}
-				});
+				}
 				if (!modified)
 					break;
 			}
@@ -508,10 +487,10 @@ namespace dnlib.DotNet.Emit {
 		/// <returns>Total size in bytes of all instructions</returns>
 		public static uint UpdateInstructionOffsets(this IList<Instruction> instructions) {
 			uint offset = 0;
-			instructions.IterateAll((list, index, instr) => {
+			foreach (var instr in instructions.GetSafeEnumerable()) {
 				instr.Offset = offset;
 				offset += (uint)instr.GetSize();
-			});
+			}
 			return offset;
 		}
 	}

@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -56,10 +35,16 @@ namespace dnlib.DotNet {
 		/// <param name="version">Version or <c>null</c></param>
 		/// <param name="culture">Culture or <c>null</c></param>
 		/// <param name="publicKey">Public key / public key token or <c>null</c></param>
+		/// <param name="attributes">Assembly attributes</param>
 		/// <returns>An assembly name string</returns>
-		internal static string GetAssemblyNameString(UTF8String name, Version version, UTF8String culture, PublicKeyBase publicKey) {
+		internal static string GetAssemblyNameString(UTF8String name, Version version, UTF8String culture, PublicKeyBase publicKey, AssemblyAttributes attributes) {
 			var sb = new StringBuilder();
-			sb.Append(UTF8String.ToSystemStringOrEmpty(name));
+
+			foreach (var c in UTF8String.ToSystemStringOrEmpty(name)) {
+				if (c == ',' || c == '=')
+					sb.Append('\\');
+				sb.Append(c);
+			}
 
 			if (version != null) {
 				sb.Append(", Version=");
@@ -74,6 +59,12 @@ namespace dnlib.DotNet {
 			sb.Append(", ");
 			sb.Append(publicKey == null || publicKey is PublicKeyToken ? "PublicKeyToken=" : "PublicKey=");
 			sb.Append(publicKey == null ? "null" : publicKey.ToString());
+
+			if ((attributes & AssemblyAttributes.Retargetable) != 0)
+				sb.Append(", Retargetable=Yes");
+
+			if ((attributes & AssemblyAttributes.ContentType_Mask) == AssemblyAttributes.ContentType_WindowsRuntime)
+				sb.Append(", ContentType=WindowsRuntime");
 
 			return sb.ToString();
 		}

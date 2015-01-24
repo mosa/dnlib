@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System.Collections.Generic;
 using System.Text;
@@ -239,7 +218,7 @@ namespace dnlib.DotNet {
 		/// <param name="methodSig">Method signature</param>
 		/// <returns>Method full name</returns>
 		public static string MethodFullName(string declaringType, UTF8String name, MethodSig methodSig) {
-			return MethodFullName(declaringType, UTF8String.ToSystemString(name), methodSig, null, null);
+			return MethodFullName(declaringType, UTF8String.ToSystemString(name), methodSig, null, null, null);
 		}
 
 		/// <summary>
@@ -251,7 +230,7 @@ namespace dnlib.DotNet {
 		/// <param name="typeGenArgs">Type generic arguments or <c>null</c> if none</param>
 		/// <returns>Method full name</returns>
 		public static string MethodFullName(string declaringType, UTF8String name, MethodSig methodSig, IList<TypeSig> typeGenArgs) {
-			return MethodFullName(declaringType, UTF8String.ToSystemString(name), methodSig, typeGenArgs, null);
+			return MethodFullName(declaringType, UTF8String.ToSystemString(name), methodSig, typeGenArgs, null, null);
 		}
 
 		/// <summary>
@@ -264,7 +243,7 @@ namespace dnlib.DotNet {
 		/// <param name="methodGenArgs">Method generic arguments or <c>null</c> if none</param>
 		/// <returns>Method full name</returns>
 		public static string MethodFullName(string declaringType, UTF8String name, MethodSig methodSig, IList<TypeSig> typeGenArgs, IList<TypeSig> methodGenArgs) {
-			return MethodFullName(declaringType, UTF8String.ToSystemString(name), methodSig, typeGenArgs, methodGenArgs);
+			return MethodFullName(declaringType, UTF8String.ToSystemString(name), methodSig, typeGenArgs, methodGenArgs, null);
 		}
 
 		/// <summary>
@@ -275,7 +254,7 @@ namespace dnlib.DotNet {
 		/// <param name="methodSig">Method signature</param>
 		/// <returns>Method full name</returns>
 		public static string MethodFullName(string declaringType, string name, MethodSig methodSig) {
-			return MethodFullName(declaringType, name, methodSig, null, null);
+			return MethodFullName(declaringType, name, methodSig, null, null, null);
 		}
 
 		/// <summary>
@@ -287,7 +266,7 @@ namespace dnlib.DotNet {
 		/// <param name="typeGenArgs">Type generic arguments or <c>null</c> if none</param>
 		/// <returns>Method full name</returns>
 		public static string MethodFullName(string declaringType, string name, MethodSig methodSig, IList<TypeSig> typeGenArgs) {
-			return MethodFullName(declaringType, name, methodSig, typeGenArgs, null);
+			return MethodFullName(declaringType, name, methodSig, typeGenArgs, null, null);
 		}
 
 		/// <summary>
@@ -300,6 +279,20 @@ namespace dnlib.DotNet {
 		/// <param name="methodGenArgs">Method generic arguments or <c>null</c> if none</param>
 		/// <returns>Method full name</returns>
 		public static string MethodFullName(string declaringType, string name, MethodSig methodSig, IList<TypeSig> typeGenArgs, IList<TypeSig> methodGenArgs) {
+			return MethodFullName(declaringType, name, methodSig, typeGenArgs, methodGenArgs, null);
+		}
+
+		/// <summary>
+		/// Returns the full name of a method
+		/// </summary>
+		/// <param name="declaringType">Declaring type full name or <c>null</c> if none</param>
+		/// <param name="name">Name of method or <c>null</c> if none</param>
+		/// <param name="methodSig">Method signature</param>
+		/// <param name="typeGenArgs">Type generic arguments or <c>null</c> if none</param>
+		/// <param name="methodGenArgs">Method generic arguments or <c>null</c> if none</param>
+		/// <param name="gppMethod">Generic parameter owner method or <c>null</c></param>
+		/// <returns>Method full name</returns>
+		public static string MethodFullName(string declaringType, string name, MethodSig methodSig, IList<TypeSig> typeGenArgs, IList<TypeSig> methodGenArgs, MethodDef gppMethod) {
 			var fnc = new FullNameCreator(false, null);
 			if (typeGenArgs != null || methodGenArgs != null)
 				fnc.genericArguments = new GenericArguments();
@@ -307,7 +300,18 @@ namespace dnlib.DotNet {
 				fnc.genericArguments.PushTypeArgs(typeGenArgs);
 			if (methodGenArgs != null)
 				fnc.genericArguments.PushMethodArgs(methodGenArgs);
-			fnc.CreateMethodFullName(declaringType, name, methodSig);
+			fnc.CreateMethodFullName(declaringType, name, methodSig, gppMethod);
+			return fnc.Result;
+		}
+
+		/// <summary>
+		/// Returns the full name of a method sig
+		/// </summary>
+		/// <param name="methodSig">Method sig</param>
+		/// <returns>Method sig full name</returns>
+		public static string MethodSigFullName(MethodSig methodSig) {
+			var fnc = new FullNameCreator(false, null);
+			fnc.CreateMethodFullName(null, null, methodSig, null);
 			return fnc.Result;
 		}
 
@@ -1294,16 +1298,14 @@ namespace dnlib.DotNet {
 				break;
 
 			case ElementType.Var:
-				if (createName) {
-					sb.Append('!');
-					sb.Append(((GenericSig)typeSig).Number);
-				}
-				break;
-
 			case ElementType.MVar:
 				if (createName) {
-					sb.Append("!!");
-					sb.Append(((GenericSig)typeSig).Number);
+					var gs = (GenericSig)typeSig;
+					var gp = gs.GenericParam;
+					if (gp == null || !AddName(gp.Name)) {
+						sb.Append(gs.IsMethodVar ? "!!" : "!");
+						sb.Append(gs.Number);
+					}
 				}
 				break;
 
@@ -1312,7 +1314,7 @@ namespace dnlib.DotNet {
 					if (isReflection)
 						sb.Append("(fnptr)");
 					else
-						CreateMethodFullName(null, null, ((FnPtrSig)typeSig).MethodSig);
+						CreateMethodFullName(null, null, ((FnPtrSig)typeSig).MethodSig, null);
 				}
 				break;
 
@@ -1390,7 +1392,7 @@ namespace dnlib.DotNet {
 			var pk = assembly.PublicKeyOrToken;
 			if (pk is PublicKey)
 				pk = ((PublicKey)pk).Token;
-			return Utils.GetAssemblyNameString(EscapeAssemblyName(assembly.Name), assembly.Version, assembly.Culture, pk);
+			return Utils.GetAssemblyNameString(EscapeAssemblyName(assembly.Name), assembly.Version, assembly.Culture, pk, assembly.Attributes);
 		}
 
 		static string EscapeAssemblyName(UTF8String asmSimplName) {
@@ -1436,7 +1438,7 @@ namespace dnlib.DotNet {
 				var pkt = assembly.PublicKeyOrToken;
 				if (pkt is PublicKey)
 					pkt = ((PublicKey)pkt).Token;
-				sb.Append(Utils.GetAssemblyNameString(assembly.Name, assembly.Version, assembly.Culture, pkt));
+				sb.Append(Utils.GetAssemblyNameString(assembly.Name, assembly.Version, assembly.Culture, pkt, assembly.Attributes));
 			}
 		}
 
@@ -1987,7 +1989,7 @@ namespace dnlib.DotNet {
 				sb.Append(name);
 		}
 
-		void CreateMethodFullName(string declaringType, string name, MethodBaseSig methodSig) {
+		void CreateMethodFullName(string declaringType, string name, MethodBaseSig methodSig, MethodDef gppMethod) {
 			if (methodSig == null) {
 				sb.Append(NULLVALUE);
 				return;
@@ -2008,7 +2010,7 @@ namespace dnlib.DotNet {
 				for (uint i = 0; i < genParamCount; i++) {
 					if (i != 0)
 						sb.Append(',');
-					CreateFullName(new GenericMVar(i));
+					CreateFullName(new GenericMVar(i, gppMethod));
 				}
 				sb.Append('>');
 			}
@@ -2039,7 +2041,7 @@ namespace dnlib.DotNet {
 		}
 
 		void CreatePropertyFullName(string declaringType, UTF8String name, CallingConventionSig propertySig) {
-			CreateMethodFullName(declaringType, UTF8String.ToSystemString(name), propertySig as MethodBaseSig);
+			CreateMethodFullName(declaringType, UTF8String.ToSystemString(name), propertySig as MethodBaseSig, null);
 		}
 
 		void CreateEventFullName(string declaringType, UTF8String name, ITypeDefOrRef typeDefOrRef) {

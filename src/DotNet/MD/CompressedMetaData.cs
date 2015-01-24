@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -152,11 +131,7 @@ namespace dnlib.DotNet.MD {
 		}
 
 		int GetPointerSize() {
-			var machine = peImage.ImageNTHeaders.FileHeader.Machine;
-			if (machine == Machine.AMD64 || machine == Machine.IA64)
-				return 8;
-			// Assume 32-bit
-			return 4;
+			return peImage.ImageNTHeaders.OptionalHeader.Magic == 0x10B ? 4 : 8;
 		}
 
 		void InitializeHotStreams(IList<HotStream> hotStreams) {
@@ -165,8 +140,7 @@ namespace dnlib.DotNet.MD {
 
 			// If this is a 32-bit image, make sure that we emulate this by masking
 			// all base offsets to 32 bits.
-			bool is64Bit = GetPointerSize() == 8;
-			long offsetMask = is64Bit ? -1L : uint.MaxValue;
+			long offsetMask = GetPointerSize() == 8 ? -1L : uint.MaxValue;
 
 			// It's always the last one found that is used
 			var hotTable = hotStreams[hotStreams.Count - 1].HotTableStream;
@@ -258,12 +232,17 @@ namespace dnlib.DotNet.MD {
 		/// <returns>A new <see cref="RidList"/> instance</returns>
 		RidList GetRidList(MDTable tableSource, uint tableSourceRid, int colIndex, MDTable tableDest) {
 			var column = tableSource.TableInfo.Columns[colIndex];
-			uint startRid;
-			if (!tablesStream.ReadColumn(tableSource, tableSourceRid, column, out startRid))
+			uint startRid, nextListRid;
+			bool hasNext;
+#if THREAD_SAFE
+			tablesStream.theLock.EnterWriteLock(); try {
+#endif
+			if (!tablesStream.ReadColumn_NoLock(tableSource, tableSourceRid, column, out startRid))
 				return RidList.Empty;
-			uint nextListRid;
-			bool hasNext = tablesStream.ReadColumn(tableSource, tableSourceRid + 1, column, out nextListRid);
-
+			hasNext = tablesStream.ReadColumn_NoLock(tableSource, tableSourceRid + 1, column, out nextListRid);
+#if THREAD_SAFE
+			} finally { tablesStream.theLock.ExitWriteLock(); }
+#endif
 			uint lastRid = tableDest.Rows + 1;
 			if (startRid == 0 || startRid >= lastRid)
 				return RidList.Empty;
@@ -276,15 +255,13 @@ namespace dnlib.DotNet.MD {
 		}
 
 		/// <inheritdoc/>
-		protected override uint BinarySearch(MDTable tableSource, int keyColIndex, uint key) {
-			if (tableSource == null)
-				return 0;
+		protected override uint BinarySearch_NoLock(MDTable tableSource, int keyColIndex, uint key) {
 			var keyColumn = tableSource.TableInfo.Columns[keyColIndex];
 			uint ridLo = 1, ridHi = tableSource.Rows;
 			while (ridLo <= ridHi) {
 				uint rid = (ridLo + ridHi) / 2;
 				uint key2;
-				if (!tablesStream.ReadColumn(tableSource, rid, keyColumn, out key2))
+				if (!tablesStream.ReadColumn_NoLock(tableSource, rid, keyColumn, out key2))
 					break;	// Never happens since rid is valid
 				if (key == key2)
 					return rid;

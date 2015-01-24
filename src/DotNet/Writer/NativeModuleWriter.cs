@@ -1,25 +1,4 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
@@ -116,36 +95,47 @@ namespace dnlib.DotNet.Writer {
 		/// </summary>
 		long checkSumOffset;
 
-		sealed class OrigSection : IDisposable {
-			public ImageSectionHeader peSection;
-			public BinaryReaderChunk chunk;
+		/// <summary>
+		/// Original PE section
+		/// </summary>
+		public sealed class OrigSection : IDisposable {
+			/// <summary>PE section</summary>
+			public ImageSectionHeader PESection;
+			/// <summary>PE section data</summary>
+			public BinaryReaderChunk Chunk;
 
+			/// <summary>
+			/// Constructor
+			/// </summary>
+			/// <param name="peSection">PE section</param>
 			public OrigSection(ImageSectionHeader peSection) {
-				this.peSection = peSection;
+				this.PESection = peSection;
 			}
 
+			/// <inheritdoc/>
 			public void Dispose() {
-				if (chunk != null)
-					chunk.Data.Dispose();
-				chunk = null;
-				peSection = null;
+				if (Chunk != null)
+					Chunk.Data.Dispose();
+				Chunk = null;
+				PESection = null;
 			}
 
+			/// <inheritdoc/>
 			public override string ToString() {
-				uint offs = chunk.Data is IImageStream ? (uint)((IImageStream)chunk.Data).FileOffset : 0;
-				return string.Format("{0} FO:{1:X8} L:{2:X8}", peSection.DisplayName, offs, (uint)chunk.Data.Length);
+				uint offs = Chunk.Data is IImageStream ? (uint)((IImageStream)Chunk.Data).FileOffset : 0;
+				return string.Format("{0} FO:{1:X8} L:{2:X8}", PESection.DisplayName, offs, (uint)Chunk.Data.Length);
 			}
 		}
 
 		/// <summary>
 		/// Gets the module
 		/// </summary>
-		public ModuleDefMD Module {
+		public ModuleDefMD ModuleDefMD {
 			get { return module; }
 		}
 
 		/// <inheritdoc/>
-		protected override ModuleDef TheModule {
+		public override ModuleDef Module {
 			get { return module; }
 		}
 
@@ -165,21 +155,28 @@ namespace dnlib.DotNet.Writer {
 		/// <summary>
 		/// Gets all <see cref="PESection"/>s
 		/// </summary>
-		public List<PESection> Sections {
+		public override List<PESection> Sections {
 			get { return sections; }
+		}
+
+		/// <summary>
+		/// Gets the original PE sections and their data
+		/// </summary>
+		public List<OrigSection> OrigSections {
+			get { return origSections; }
 		}
 
 		/// <summary>
 		/// Gets the <c>.text</c> section
 		/// </summary>
-		public PESection TextSection {
+		public override PESection TextSection {
 			get { return textSection; }
 		}
 
 		/// <summary>
 		/// Gets the <c>.rsrc</c> section or <c>null</c> if there's none
 		/// </summary>
-		public PESection RsrcSection {
+		public override PESection RsrcSection {
 			get { return rsrcSection; }
 		}
 
@@ -243,6 +240,8 @@ namespace dnlib.DotNet.Writer {
 		void CreateChunks() {
 			CreateMetaDataChunks(module);
 
+			CreateDebugDirectory();
+
 			imageCor20Header = new ByteArrayChunk(new byte[0x48]);
 			CreateStrongNameSignature();
 		}
@@ -254,6 +253,7 @@ namespace dnlib.DotNet.Writer {
 			textSection.Add(methodBodies, DEFAULT_METHODBODIES_ALIGNMENT);
 			textSection.Add(netResources, DEFAULT_NETRESOURCES_ALIGNMENT);
 			textSection.Add(metaData, DEFAULT_METADATA_ALIGNMENT);
+			textSection.Add(debugDirectory, DEFAULT_DEBUGDIRECTORY_ALIGNMENT);
 			if (rsrcSection != null)
 				rsrcSection.Add(win32Resources, DEFAULT_WIN32_RESOURCES_ALIGNMENT);
 		}
@@ -284,7 +284,7 @@ namespace dnlib.DotNet.Writer {
 				var newSection = new OrigSection(peSection);
 				origSections.Add(newSection);
 				uint sectionSize = Utils.AlignUp(peSection.SizeOfRawData, fileAlignment);
-				newSection.chunk = new BinaryReaderChunk(peImage.CreateStream(peSection.VirtualAddress, sectionSize), peSection.VirtualSize);
+				newSection.Chunk = new BinaryReaderChunk(peImage.CreateStream(peSection.VirtualAddress, sectionSize), peSection.VirtualSize);
 			}
 		}
 
@@ -336,24 +336,29 @@ namespace dnlib.DotNet.Writer {
 		uint GetLastFileSectionOffset() {
 			uint rva = 0;
 			foreach (var sect in origSections)
-				rva = Math.Max(rva, (uint)sect.peSection.VirtualAddress + sect.peSection.SizeOfRawData);
+				rva = Math.Max(rva, (uint)sect.PESection.VirtualAddress + sect.PESection.SizeOfRawData);
 			return (uint)peImage.ToFileOffset((RVA)(rva - 1)) + 1;
 		}
 
 		long WriteFile() {
+			Listener.OnWriterEvent(this, ModuleWriterEvent.BeginWritePdb);
+			WritePdbFile();
+			Listener.OnWriterEvent(this, ModuleWriterEvent.EndWritePdb);
+
+			Listener.OnWriterEvent(this, ModuleWriterEvent.BeginCalculateRvasAndFileOffsets);
+
 			var chunks = new List<IChunk>();
 			chunks.Add(headerSection);
 			foreach (var origSection in origSections)
-				chunks.Add(origSection.chunk);
+				chunks.Add(origSection.Chunk);
 			foreach (var section in sections)
 				chunks.Add(section);
 			if (extraData != null)
 				chunks.Add(extraData);
 
-			Listener.OnWriterEvent(this, ModuleWriterEvent.BeginCalculateRvasAndFileOffsets);
 			CalculateRvasAndFileOffsets(chunks, 0, 0, peImage.ImageNTHeaders.OptionalHeader.FileAlignment, peImage.ImageNTHeaders.OptionalHeader.SectionAlignment);
 			foreach (var section in origSections) {
-				if (section.chunk.RVA != section.peSection.VirtualAddress)
+				if (section.Chunk.RVA != section.PESection.VirtualAddress)
 					throw new ModuleWriterException("Invalid section RVA");
 			}
 			Listener.OnWriterEvent(this, ModuleWriterEvent.EndCalculateRvasAndFileOffsets);
@@ -499,6 +504,14 @@ namespace dnlib.DotNet.Writer {
 				writer.WriteDataDirectory(win32Resources);
 			}
 
+			// Clear the security descriptor directory
+			writer.BaseStream.Position = dataDirOffset + 4 * 8;
+			writer.WriteDataDirectory(null);
+
+			// Write a new debug directory
+			writer.BaseStream.Position = dataDirOffset + 6 * 8;
+			writer.WriteDataDirectory(debugDirectory, DebugDirectory.HEADER_SIZE);
+
 			// Write a new Metadata data directory
 			writer.BaseStream.Position = dataDirOffset + 14 * 8;
 			writer.WriteDataDirectory(imageCor20Header);
@@ -507,7 +520,7 @@ namespace dnlib.DotNet.Writer {
 			writer.BaseStream.Position = sectionsOffset;
 			foreach (var section in origSections) {
 				writer.BaseStream.Position += 0x14;
-				writer.Write((uint)section.chunk.FileOffset);	// PointerToRawData
+				writer.Write((uint)section.Chunk.FileOffset);	// PointerToRawData
 				writer.BaseStream.Position += 0x10;
 			}
 			foreach (var section in sections)
@@ -609,16 +622,16 @@ namespace dnlib.DotNet.Writer {
 			if (rva == 0)
 				return 0;
 			foreach (var sect in origSections) {
-				var section = sect.peSection;
+				var section = sect.PESection;
 				if (section.VirtualAddress <= rva && rva < section.VirtualAddress + Math.Max(section.VirtualSize, section.SizeOfRawData))
-					return destStreamBaseOffset + (long)sect.chunk.FileOffset + (rva - section.VirtualAddress);
+					return destStreamBaseOffset + (long)sect.Chunk.FileOffset + (rva - section.VirtualAddress);
 			}
 			return 0;
 		}
 
 		IEnumerable<SectionSizeInfo> GetSectionSizeInfos() {
 			foreach (var section in origSections)
-				yield return new SectionSizeInfo(section.chunk.GetVirtualSize(), section.peSection.Characteristics);
+				yield return new SectionSizeInfo(section.Chunk.GetVirtualSize(), section.PESection.Characteristics);
 			foreach (var section in sections)
 				yield return new SectionSizeInfo(section.GetVirtualSize(), section.Characteristics);
 		}

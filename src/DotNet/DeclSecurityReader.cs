@@ -1,25 +1,4 @@
-﻿/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+﻿// dnlib: See LICENSE.txt for more info
 
 using System;
 using System.Collections.Generic;
@@ -40,6 +19,7 @@ namespace dnlib.DotNet {
 	public struct DeclSecurityReader : IDisposable {
 		readonly IBinaryReader reader;
 		readonly ModuleDef module;
+		readonly GenericParamContext gpContext;
 
 		/// <summary>
 		/// Reads a <c>DeclSecurity</c> blob
@@ -48,7 +28,18 @@ namespace dnlib.DotNet {
 		/// <param name="sig"><c>#Blob</c> offset of <c>DeclSecurity</c> signature</param>
 		/// <returns>A list of <see cref="SecurityAttribute"/>s</returns>
 		public static ThreadSafe.IList<SecurityAttribute> Read(ModuleDefMD module, uint sig) {
-			return Read(module, module.BlobStream.CreateStream(sig));
+			return Read(module, module.BlobStream.CreateStream(sig), new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a <c>DeclSecurity</c> blob
+		/// </summary>
+		/// <param name="module">Module that will own the returned list</param>
+		/// <param name="sig"><c>#Blob</c> offset of <c>DeclSecurity</c> signature</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A list of <see cref="SecurityAttribute"/>s</returns>
+		public static ThreadSafe.IList<SecurityAttribute> Read(ModuleDefMD module, uint sig, GenericParamContext gpContext) {
+			return Read(module, module.BlobStream.CreateStream(sig), gpContext);
 		}
 
 		/// <summary>
@@ -58,7 +49,18 @@ namespace dnlib.DotNet {
 		/// <param name="blob"><c>DeclSecurity</c> blob</param>
 		/// <returns>A list of <see cref="SecurityAttribute"/>s</returns>
 		public static ThreadSafe.IList<SecurityAttribute> Read(ModuleDef module, byte[] blob) {
-			return Read(module, MemoryImageStream.Create(blob));
+			return Read(module, MemoryImageStream.Create(blob), new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a <c>DeclSecurity</c> blob
+		/// </summary>
+		/// <param name="module">Module that will own the returned list</param>
+		/// <param name="blob"><c>DeclSecurity</c> blob</param>
+		/// <param name="gpContext">Generic parameter context</param>/// 
+		/// <returns>A list of <see cref="SecurityAttribute"/>s</returns>
+		public static ThreadSafe.IList<SecurityAttribute> Read(ModuleDef module, byte[] blob, GenericParamContext gpContext) {
+			return Read(module, MemoryImageStream.Create(blob), gpContext);
 		}
 
 		/// <summary>
@@ -68,13 +70,25 @@ namespace dnlib.DotNet {
 		/// <param name="signature"><c>DeclSecurity</c> stream that will be owned by us</param>
 		/// <returns>A list of <see cref="SecurityAttribute"/>s</returns>
 		public static ThreadSafe.IList<SecurityAttribute> Read(ModuleDef module, IBinaryReader signature) {
-			using (var reader = new DeclSecurityReader(module, signature))
+			return Read(module, signature, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a <c>DeclSecurity</c> blob
+		/// </summary>
+		/// <param name="module">Module that will own the returned list</param>
+		/// <param name="signature"><c>DeclSecurity</c> stream that will be owned by us</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A list of <see cref="SecurityAttribute"/>s</returns>
+		public static ThreadSafe.IList<SecurityAttribute> Read(ModuleDef module, IBinaryReader signature, GenericParamContext gpContext) {
+			using (var reader = new DeclSecurityReader(module, signature, gpContext))
 				return reader.Read();
 		}
 
-		DeclSecurityReader(ModuleDef module, IBinaryReader reader) {
+		DeclSecurityReader(ModuleDef module, IBinaryReader reader, GenericParamContext gpContext) {
 			this.reader = reader;
 			this.module = module;
+			this.gpContext = gpContext;
 		}
 
 		ThreadSafe.IList<SecurityAttribute> Read() {
@@ -103,10 +117,10 @@ namespace dnlib.DotNet {
 			for (int i = 0; i < numAttrs; i++) {
 				var name = ReadUTF8String();
 				// Use CA search rules. Some tools don't write the fully qualified name.
-				var attrRef = TypeNameParser.ParseReflection(module, UTF8String.ToSystemStringOrEmpty(name), new CAAssemblyRefFinder(module));
+				var attrRef = TypeNameParser.ParseReflection(module, UTF8String.ToSystemStringOrEmpty(name), new CAAssemblyRefFinder(module), gpContext);
 				int blobLength = (int)reader.ReadCompressedUInt32();
 				int numNamedArgs = (int)reader.ReadCompressedUInt32();
-				var namedArgs = CustomAttributeReader.ReadNamedArguments(module, reader, numNamedArgs);
+				var namedArgs = CustomAttributeReader.ReadNamedArguments(module, reader, numNamedArgs, gpContext);
 				if (namedArgs == null)
 					throw new ApplicationException("Could not read named arguments");
 				list.Add(new SecurityAttribute(attrRef, namedArgs));

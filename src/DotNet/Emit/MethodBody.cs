@@ -1,27 +1,7 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System.Collections.Generic;
+using dnlib.DotNet.Pdb;
 using dnlib.PE;
 using dnlib.Threading;
 
@@ -71,12 +51,22 @@ namespace dnlib.DotNet.Emit {
 	/// CIL (managed code) body
 	/// </summary>
 	public sealed class CilBody : MethodBody {
+		bool keepOldMaxStack;
 		bool initLocals;
 		ushort maxStack;
 		uint localVarSigTok;
 		readonly ThreadSafe.IList<Instruction> instructions;
 		readonly ThreadSafe.IList<ExceptionHandler> exceptionHandlers;
 		readonly LocalList localList;
+		PdbScope pdbScope;
+
+		/// <summary>
+		/// Gets/sets a flag indicating whether the original max stack value should be used.
+		/// </summary>
+		public bool KeepOldMaxStack {
+			get { return keepOldMaxStack; }
+			set { keepOldMaxStack = value; }
+		}
 
 		/// <summary>
 		/// Gets/sets the init locals flag. This is only valid if the method has any locals.
@@ -142,6 +132,22 @@ namespace dnlib.DotNet.Emit {
 		/// </summary>
 		public LocalList Variables {// Only called Variables for compat w/ older code. Locals is a better and more accurate name
 			get { return localList; }
+		}
+
+		/// <summary>
+		/// Gets/sets the PDB scope. This is <c>null</c> if no PDB has been loaded or if there's
+		/// no PDB scope for this method.
+		/// </summary>
+		public PdbScope Scope {
+			get { return pdbScope; }
+			set { pdbScope = value; }
+		}
+
+		/// <summary>
+		/// <c>true</c> if <see cref="Scope"/> is not <c>null</c>
+		/// </summary>
+		public bool HasScope {
+			get { return pdbScope != null; }
 		}
 
 		/// <summary>

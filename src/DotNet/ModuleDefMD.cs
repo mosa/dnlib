@@ -1,28 +1,8 @@
-/*
-    Copyright (C) 2012-2014 de4dot@gmail.com
-
-    Permission is hereby granted, free of charge, to any person obtaining
-    a copy of this software and associated documentation files (the
-    "Software"), to deal in the Software without restriction, including
-    without limitation the rights to use, copy, modify, merge, publish,
-    distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to
-    the following conditions:
-
-    The above copyright notice and this permission notice shall be
-    included in all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// dnlib: See LICENSE.txt for more info
 
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.SymbolStore;
 using System.IO;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
@@ -34,6 +14,7 @@ using dnlib.IO;
 using dnlib.DotNet;
 using dnlib.DotNet.MD;
 using dnlib.DotNet.Emit;
+using dnlib.DotNet.Pdb;
 using dnlib.Threading;
 using dnlib.W32Resources;
 
@@ -51,13 +32,10 @@ namespace dnlib.DotNet {
 	/// </summary>
 	public sealed class ModuleDefMD : ModuleDefMD2, IInstructionOperandResolver, ISignatureReaderHelper {
 		/// <summary>The file that contains all .NET metadata</summary>
-		DotNetFile dnFile;
+		MetaData metaData;
 		IMethodDecrypter methodDecrypter;
 		IStringDecrypter stringDecrypter;
 
-		UserValue<string> location;
-		UserValue<Win32Resources> win32Resources;
-		UserValue<VTableFixups> vtableFixups;
 		RandomRidList moduleRidList;
 
 		SimpleLazyList<ModuleDefMD2> listModuleDefMD;
@@ -66,16 +44,16 @@ namespace dnlib.DotNet {
 		SimpleLazyList<FieldDefMD> listFieldDefMD;
 		SimpleLazyList<MethodDefMD> listMethodDefMD;
 		SimpleLazyList<ParamDefMD> listParamDefMD;
-		SimpleLazyList<InterfaceImplMD> listInterfaceImplMD;
-		SimpleLazyList<MemberRefMD> listMemberRefMD;
+		SimpleLazyList2<InterfaceImplMD> listInterfaceImplMD;
+		SimpleLazyList2<MemberRefMD> listMemberRefMD;
 		SimpleLazyList<ConstantMD> listConstantMD;
 		SimpleLazyList<DeclSecurityMD> listDeclSecurityMD;
 		SimpleLazyList<ClassLayoutMD> listClassLayoutMD;
-		SimpleLazyList<StandAloneSigMD> listStandAloneSigMD;
+		SimpleLazyList2<StandAloneSigMD> listStandAloneSigMD;
 		SimpleLazyList<EventDefMD> listEventDefMD;
 		SimpleLazyList<PropertyDefMD> listPropertyDefMD;
 		SimpleLazyList<ModuleRefMD> listModuleRefMD;
-		SimpleLazyList<TypeSpecMD> listTypeSpecMD;
+		SimpleLazyList2<TypeSpecMD> listTypeSpecMD;
 		SimpleLazyList<ImplMapMD> listImplMapMD;
 		SimpleLazyList<AssemblyDefMD> listAssemblyDefMD;
 		SimpleLazyList<AssemblyRefMD> listAssemblyRefMD;
@@ -83,8 +61,8 @@ namespace dnlib.DotNet {
 		SimpleLazyList<ExportedTypeMD> listExportedTypeMD;
 		SimpleLazyList<ManifestResourceMD> listManifestResourceMD;
 		SimpleLazyList<GenericParamMD> listGenericParamMD;
-		SimpleLazyList<MethodSpecMD> listMethodSpecMD;
-		SimpleLazyList<GenericParamConstraintMD> listGenericParamConstraintMD;
+		SimpleLazyList2<MethodSpecMD> listMethodSpecMD;
+		SimpleLazyList2<GenericParamConstraintMD> listGenericParamConstraintMD;
 
 		/// <summary>
 		/// Gets/sets the method decrypter
@@ -103,106 +81,79 @@ namespace dnlib.DotNet {
 		}
 
 		/// <summary>
-		/// Returns the .NET file
-		/// </summary>
-		public DotNetFile DotNetFile {
-			get { return dnFile; }
-		}
-
-		/// <summary>
 		/// Returns the .NET metadata interface
 		/// </summary>
 		public IMetaData MetaData {
-			get { return dnFile.MetaData; }
+			get { return metaData; }
 		}
 
 		/// <summary>
 		/// Returns the #~ or #- tables stream
 		/// </summary>
 		public TablesStream TablesStream {
-			get { return dnFile.MetaData.TablesStream; }
+			get { return metaData.TablesStream; }
 		}
 
 		/// <summary>
 		/// Returns the #Strings stream
 		/// </summary>
 		public StringsStream StringsStream {
-			get { return dnFile.MetaData.StringsStream; }
+			get { return metaData.StringsStream; }
 		}
 
 		/// <summary>
 		/// Returns the #Blob stream
 		/// </summary>
 		public BlobStream BlobStream {
-			get { return dnFile.MetaData.BlobStream; }
+			get { return metaData.BlobStream; }
 		}
 
 		/// <summary>
 		/// Returns the #GUID stream
 		/// </summary>
 		public GuidStream GuidStream {
-			get { return dnFile.MetaData.GuidStream; }
+			get { return metaData.GuidStream; }
 		}
 
 		/// <summary>
 		/// Returns the #US stream
 		/// </summary>
 		public USStream USStream {
-			get { return dnFile.MetaData.USStream; }
+			get { return metaData.USStream; }
 		}
 
 		/// <inheritdoc/>
-		public override ThreadSafe.IList<TypeDef> Types {
-			get {
-				if (types == null) {
-					var list = MetaData.GetNonNestedClassRidList();
-					var tmp = new LazyList<TypeDef>((int)list.Length, this, list, (list2, index) => ResolveTypeDef(((RidList)list2)[index]));
-					Interlocked.CompareExchange(ref types, tmp, null);
-				}
-				return types;
-			}
+		protected override void InitializeTypes() {
+			var list = MetaData.GetNonNestedClassRidList();
+			var tmp = new LazyList<TypeDef>((int)list.Length, this, list, (list2, index) => ResolveTypeDef(((RidList)list2)[index]));
+			Interlocked.CompareExchange(ref types, tmp, null);
 		}
 
 		/// <inheritdoc/>
-		public override ThreadSafe.IList<ExportedType> ExportedTypes {
-			get {
-				if (exportedTypes == null) {
-					var list = MetaData.GetExportedTypeRidList();
-					var tmp = new LazyList<ExportedType>((int)list.Length, list, (list2, i) => ResolveExportedType(((RidList)list2)[i]));
-					Interlocked.CompareExchange(ref exportedTypes, tmp, null);
-				}
-				return exportedTypes;
-			}
+		protected override void InitializeExportedTypes() {
+			var list = MetaData.GetExportedTypeRidList();
+			var tmp = new LazyList<ExportedType>((int)list.Length, list, (list2, i) => ResolveExportedType(((RidList)list2)[i]));
+			Interlocked.CompareExchange(ref exportedTypes, tmp, null);
 		}
 
 		/// <inheritdoc/>
-		public override ResourceCollection Resources {
-			get {
-				if (resources == null) {
-					var table = TablesStream.ManifestResourceTable;
-					var tmp = new ResourceCollection((int)table.Rows, null, (ctx, i) => CreateResource(i + 1));
-					Interlocked.CompareExchange(ref resources, tmp, null);
-				}
-				return resources;
-			}
+		protected override void InitializeResources() {
+			var table = TablesStream.ManifestResourceTable;
+			var tmp = new ResourceCollection((int)table.Rows, null, (ctx, i) => CreateResource(i + 1));
+			Interlocked.CompareExchange(ref resources, tmp, null);
 		}
 
 		/// <inheritdoc/>
-		public override string Location {
-			get { return location.Value; }
-			set { location.Value = value ?? string.Empty; }
+		protected override Win32Resources GetWin32Resources_NoLock() {
+			return metaData.PEImage.Win32Resources;
 		}
 
 		/// <inheritdoc/>
-		public override Win32Resources Win32Resources {
-			get { return win32Resources.Value; }
-			set { win32Resources.Value = value; }
-		}
-
-		/// <inheritdoc/>
-		public override VTableFixups VTableFixups {
-			get { return vtableFixups.Value; }
-			set { vtableFixups.Value = value; }
+		protected override VTableFixups GetVTableFixups_NoLock() {
+			var vtableFixupsInfo = metaData.ImageCor20Header.VTableFixups;
+			if (vtableFixupsInfo.VirtualAddress == 0 || vtableFixupsInfo.Size == 0)
+				return null;
+			return new VTableFixups(this);
 		}
 
 		/// <summary>
@@ -211,7 +162,7 @@ namespace dnlib.DotNet {
 		/// <param name="fileName">File name of an existing .NET module/assembly</param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(string fileName) {
-			return Load(fileName, null);
+			return Load(fileName, (ModuleCreationOptions)null);
 		}
 
 		/// <summary>
@@ -221,15 +172,17 @@ namespace dnlib.DotNet {
 		/// <param name="context">Module context or <c>null</c></param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(string fileName, ModuleContext context) {
-			DotNetFile dnFile = null;
-			try {
-				return Load(dnFile = DotNetFile.Load(fileName), context);
-			}
-			catch {
-				if (dnFile != null)
-					dnFile.Dispose();
-				throw;
-			}
+			return Load(fileName, new ModuleCreationOptions(context));
+		}
+
+		/// <summary>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a file
+		/// </summary>
+		/// <param name="fileName">File name of an existing .NET module/assembly</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
+		public static ModuleDefMD Load(string fileName, ModuleCreationOptions options) {
+			return Load(MetaDataCreator.Load(fileName), options);
 		}
 
 		/// <summary>
@@ -238,7 +191,7 @@ namespace dnlib.DotNet {
 		/// <param name="data">Contents of a .NET module/assembly</param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(byte[] data) {
-			return Load(data, null);
+			return Load(data, (ModuleCreationOptions)null);
 		}
 
 		/// <summary>
@@ -248,15 +201,17 @@ namespace dnlib.DotNet {
 		/// <param name="context">Module context or <c>null</c></param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(byte[] data, ModuleContext context) {
-			DotNetFile dnFile = null;
-			try {
-				return Load(dnFile = DotNetFile.Load(data), context);
-			}
-			catch {
-				if (dnFile != null)
-					dnFile.Dispose();
-				throw;
-			}
+			return Load(data, new ModuleCreationOptions(context));
+		}
+
+		/// <summary>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a byte[]
+		/// </summary>
+		/// <param name="data">Contents of a .NET module/assembly</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
+		public static ModuleDefMD Load(byte[] data, ModuleCreationOptions options) {
+			return Load(MetaDataCreator.Load(data), options);
 		}
 
 		/// <summary>
@@ -265,7 +220,7 @@ namespace dnlib.DotNet {
 		/// <param name="mod">An existing reflection module</param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(System.Reflection.Module mod) {
-			return Load(mod, null, GetImageLayout(mod));
+			return Load(mod, (ModuleCreationOptions)null, GetImageLayout(mod));
 		}
 
 		/// <summary>
@@ -275,7 +230,17 @@ namespace dnlib.DotNet {
 		/// <param name="context">Module context or <c>null</c></param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(System.Reflection.Module mod, ModuleContext context) {
-			return Load(mod, context, GetImageLayout(mod));
+			return Load(mod, new ModuleCreationOptions(context), GetImageLayout(mod));
+		}
+
+		/// <summary>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a reflection module
+		/// </summary>
+		/// <param name="mod">An existing reflection module</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
+		public static ModuleDefMD Load(System.Reflection.Module mod, ModuleCreationOptions options) {
+			return Load(mod, options, GetImageLayout(mod));
 		}
 
 		static ImageLayout GetImageLayout(System.Reflection.Module mod) {
@@ -293,10 +258,21 @@ namespace dnlib.DotNet {
 		/// <param name="imageLayout">Image layout of the module in memory</param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(System.Reflection.Module mod, ModuleContext context, ImageLayout imageLayout) {
+			return Load(mod, new ModuleCreationOptions(context), imageLayout);
+		}
+
+		/// <summary>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a reflection module
+		/// </summary>
+		/// <param name="mod">An existing reflection module</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <param name="imageLayout">Image layout of the module in memory</param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
+		public static ModuleDefMD Load(System.Reflection.Module mod, ModuleCreationOptions options, ImageLayout imageLayout) {
 			IntPtr addr = Marshal.GetHINSTANCE(mod);
 			if (addr == new IntPtr(-1))
 				throw new InvalidOperationException(string.Format("Module {0} has no HINSTANCE", mod));
-			return Load(addr, context, imageLayout);
+			return Load(addr, options, imageLayout);
 		}
 
 		/// <summary>
@@ -305,7 +281,7 @@ namespace dnlib.DotNet {
 		/// <param name="addr">Address of a .NET module/assembly</param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(IntPtr addr) {
-			return Load(addr, null);
+			return Load(MetaDataCreator.Load(addr), (ModuleCreationOptions)null);
 		}
 
 		/// <summary>
@@ -315,15 +291,17 @@ namespace dnlib.DotNet {
 		/// <param name="context">Module context or <c>null</c></param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(IntPtr addr, ModuleContext context) {
-			DotNetFile dnFile = null;
-			try {
-				return Load(dnFile = DotNetFile.Load(addr), context);
-			}
-			catch {
-				if (dnFile != null)
-					dnFile.Dispose();
-				throw;
-			}
+			return Load(MetaDataCreator.Load(addr), new ModuleCreationOptions(context));
+		}
+
+		/// <summary>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a memory location
+		/// </summary>
+		/// <param name="addr">Address of a .NET module/assembly</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
+		public static ModuleDefMD Load(IntPtr addr, ModuleCreationOptions options) {
+			return Load(MetaDataCreator.Load(addr), options);
 		}
 
 		/// <summary>
@@ -334,15 +312,18 @@ namespace dnlib.DotNet {
 		/// <param name="imageLayout">Image layout of the file in memory</param>
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		public static ModuleDefMD Load(IntPtr addr, ModuleContext context, ImageLayout imageLayout) {
-			DotNetFile dnFile = null;
-			try {
-				return Load(dnFile = DotNetFile.Load(addr, imageLayout), context);
-			}
-			catch {
-				if (dnFile != null)
-					dnFile.Dispose();
-				throw;
-			}
+			return Load(MetaDataCreator.Load(addr, imageLayout), new ModuleCreationOptions(context));
+		}
+
+		/// <summary>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a memory location
+		/// </summary>
+		/// <param name="addr">Address of a .NET module/assembly</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <param name="imageLayout">Image layout of the file in memory</param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
+		public static ModuleDefMD Load(IntPtr addr, ModuleCreationOptions options, ImageLayout imageLayout) {
+			return Load(MetaDataCreator.Load(addr, imageLayout), options);
 		}
 
 		/// <summary>
@@ -354,7 +335,7 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		/// <exception cref="ArgumentNullException">If <paramref name="stream"/> is <c>null</c></exception>
 		public static ModuleDefMD Load(Stream stream) {
-			return Load(stream, null);
+			return Load(stream, (ModuleCreationOptions)null);
 		}
 
 		/// <summary>
@@ -367,6 +348,19 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
 		/// <exception cref="ArgumentNullException">If <paramref name="stream"/> is <c>null</c></exception>
 		public static ModuleDefMD Load(Stream stream, ModuleContext context) {
+			return Load(stream, new ModuleCreationOptions(context));
+		}
+
+		/// <summary>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a stream
+		/// </summary>
+		/// <remarks>This will read all bytes from the stream and call <see cref="Load(byte[],ModuleContext)"/>.
+		/// It's better to use one of the other Load() methods.</remarks>
+		/// <param name="stream">The stream (owned by caller)</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance</returns>
+		/// <exception cref="ArgumentNullException">If <paramref name="stream"/> is <c>null</c></exception>
+		public static ModuleDefMD Load(Stream stream, ModuleCreationOptions options) {
 			if (stream == null)
 				throw new ArgumentNullException("stream");
 			if (stream.Length > int.MaxValue)
@@ -375,43 +369,38 @@ namespace dnlib.DotNet {
 			stream.Position = 0;
 			if (stream.Read(data, 0, data.Length) != data.Length)
 				throw new IOException("Could not read all bytes from the stream");
-			return Load(data, context);
+			return Load(data, options);
 		}
 
 		/// <summary>
-		/// Creates a <see cref="ModuleDefMD"/> instance from a <see cref="DotNetFile"/>
+		/// Creates a <see cref="ModuleDefMD"/> instance from a <see cref="MetaData"/>
 		/// </summary>
-		/// <param name="dnFile">The loaded .NET file</param>
-		/// <returns>A new <see cref="ModuleDefMD"/> instance that now owns <paramref name="dnFile"/></returns>
-		public static ModuleDefMD Load(DotNetFile dnFile) {
-			return Load(dnFile, null);
-		}
-
-		/// <summary>
-		/// Creates a <see cref="ModuleDefMD"/> instance from a <see cref="DotNetFile"/>
-		/// </summary>
-		/// <param name="dnFile">The loaded .NET file</param>
-		/// <param name="context">Module context or <c>null</c></param>
-		/// <returns>A new <see cref="ModuleDefMD"/> instance that now owns <paramref name="dnFile"/></returns>
-		public static ModuleDefMD Load(DotNetFile dnFile, ModuleContext context) {
-			return new ModuleDefMD(dnFile, context);
+		/// <param name="metaData">The metadata</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <returns>A new <see cref="ModuleDefMD"/> instance that now owns <paramref name="metaData"/></returns>
+		internal static ModuleDefMD Load(MetaData metaData, ModuleCreationOptions options) {
+			return new ModuleDefMD(metaData, options);
 		}
 
 		/// <summary>
 		/// Constructor
 		/// </summary>
-		/// <param name="dnFile">The loaded .NET file</param>
-		/// <param name="context">Module context or <c>null</c></param>
-		/// <exception cref="ArgumentNullException">If <paramref name="dnFile"/> is <c>null</c></exception>
-		ModuleDefMD(DotNetFile dnFile, ModuleContext context)
+		/// <param name="metaData">The metadata</param>
+		/// <param name="options">Module creation options or <c>null</c></param>
+		/// <exception cref="ArgumentNullException">If <paramref name="metaData"/> is <c>null</c></exception>
+		ModuleDefMD(MetaData metaData, ModuleCreationOptions options)
 			: base(null, 1) {
 #if DEBUG
-			if (dnFile == null)
-				throw new ArgumentNullException("dnFile");
+			if (metaData == null)
+				throw new ArgumentNullException("metaData");
 #endif
-			this.dnFile = dnFile;
-			this.context = context;
+			if (options == null)
+				options = ModuleCreationOptions.Default;
+			this.metaData = metaData;
+			this.context = options.Context;
 			Initialize();
+			InitializeFromRawRow();
+			location = metaData.PEImage.FileName ?? string.Empty;
 
 			this.Kind = GetKind();
 			this.Characteristics = MetaData.PEImage.ImageNTHeaders.FileHeader.Characteristics;
@@ -421,6 +410,128 @@ namespace dnlib.DotNet {
 			this.Cor20HeaderFlags = MetaData.ImageCor20Header.Flags;
 			this.Cor20HeaderRuntimeVersion = (uint)(MetaData.ImageCor20Header.MajorRuntimeVersion << 16) | MetaData.ImageCor20Header.MinorRuntimeVersion;
 			this.TablesHeaderVersion = MetaData.TablesStream.Version;
+			corLibTypes = new CorLibTypes(this, options.CorLibAssemblyRef ?? FindCorLibAssemblyRef());
+			InitializePdb(options);
+		}
+
+		void InitializePdb(ModuleCreationOptions options) {
+			if (options == null)
+				return;
+			LoadPdb(CreateSymbolReader(options));
+		}
+
+		ISymbolReader CreateSymbolReader(ModuleCreationOptions options) {
+			if (options.CreateSymbolReader != null) {
+				var symReader = options.CreateSymbolReader(this);
+				if (symReader != null)
+					return symReader;
+			}
+
+			if (options.PdbFileOrData != null) {
+				var pdbFileName = options.PdbFileOrData as string;
+				if (!string.IsNullOrEmpty(pdbFileName)) {
+					var symReader = SymbolReaderCreator.Create(options.PdbImplementation, metaData, pdbFileName);
+					if (symReader != null)
+						return symReader;
+				}
+
+				var pdbData = options.PdbFileOrData as byte[];
+				if (pdbData != null)
+					return SymbolReaderCreator.Create(options.PdbImplementation, metaData, pdbData);
+
+				var pdbStream = options.PdbFileOrData as IImageStream;
+				if (pdbStream != null)
+					return SymbolReaderCreator.Create(options.PdbImplementation, metaData, pdbStream);
+			}
+
+			if (options.TryToLoadPdbFromDisk && !string.IsNullOrEmpty(location))
+				return SymbolReaderCreator.Create(options.PdbImplementation, location);
+
+			return null;
+		}
+
+		/// <summary>
+		/// Loads symbols using <paramref name="symbolReader"/>
+		/// </summary>
+		/// <param name="symbolReader">PDB symbol reader</param>
+		public void LoadPdb(ISymbolReader symbolReader) {
+			if (symbolReader == null)
+				return;
+			if (pdbState != null)
+				throw new InvalidOperationException("PDB file has already been initialized");
+
+			var orig = Interlocked.CompareExchange(ref pdbState, new PdbState(symbolReader, this), null);
+			if (orig != null)
+				throw new InvalidOperationException("PDB file has already been initialized");
+		}
+
+		/// <summary>
+		/// Loads symbols from a PDB file
+		/// </summary>
+		/// <param name="pdbFileName">PDB file name</param>
+		public void LoadPdb(string pdbFileName) {
+			LoadPdb(PdbImplType.Default, pdbFileName);
+		}
+
+		/// <summary>
+		/// Loads symbols from a PDB file
+		/// </summary>
+		/// <param name="pdbImpl">PDB implementation to use</param>
+		/// <param name="pdbFileName">PDB file name</param>
+		public void LoadPdb(PdbImplType pdbImpl, string pdbFileName) {
+			LoadPdb(SymbolReaderCreator.Create(pdbImpl, metaData, pdbFileName));
+		}
+
+		/// <summary>
+		/// Loads symbols from a byte array
+		/// </summary>
+		/// <param name="pdbData">PDB data</param>
+		public void LoadPdb(byte[] pdbData) {
+			LoadPdb(PdbImplType.Default, pdbData);
+		}
+
+		/// <summary>
+		/// Loads symbols from a byte array
+		/// </summary>
+		/// <param name="pdbImpl">PDB implementation to use</param>
+		/// <param name="pdbData">PDB data</param>
+		public void LoadPdb(PdbImplType pdbImpl, byte[] pdbData) {
+			LoadPdb(SymbolReaderCreator.Create(pdbImpl, metaData, pdbData));
+		}
+
+		/// <summary>
+		/// Loads symbols from a stream
+		/// </summary>
+		/// <param name="pdbStream">PDB file stream which is now owned by us</param>
+		public void LoadPdb(IImageStream pdbStream) {
+			LoadPdb(PdbImplType.Default, pdbStream);
+		}
+
+		/// <summary>
+		/// Loads symbols from a stream
+		/// </summary>
+		/// <param name="pdbImpl">PDB implementation to use</param>
+		/// <param name="pdbStream">PDB file stream which is now owned by us</param>
+		public void LoadPdb(PdbImplType pdbImpl, IImageStream pdbStream) {
+			LoadPdb(SymbolReaderCreator.Create(pdbImpl, metaData, pdbStream));
+		}
+
+		/// <summary>
+		/// Loads symbols if a PDB file is available
+		/// </summary>
+		public void LoadPdb() {
+			LoadPdb(PdbImplType.Default);
+		}
+
+		/// <summary>
+		/// Loads symbols if a PDB file is available
+		/// </summary>
+		/// <param name="pdbImpl">PDB implementation to use</param>
+		public void LoadPdb(PdbImplType pdbImpl) {
+			var loc = location;
+			if (string.IsNullOrEmpty(loc))
+				return;
+			LoadPdb(SymbolReaderCreator.Create(pdbImpl, loc));
 		}
 
 		ModuleKind GetKind() {
@@ -442,7 +553,7 @@ namespace dnlib.DotNet {
 		}
 
 		void Initialize() {
-			var ts = dnFile.MetaData.TablesStream;
+			var ts = metaData.TablesStream;
 
 			// FindCorLibAssemblyRef() needs this list initialized. Other code may need corLibTypes
 			// so initialize these two first.
@@ -456,41 +567,23 @@ namespace dnlib.DotNet {
 			listFieldDefMD = new SimpleLazyList<FieldDefMD>(ts.FieldTable.Rows, rid2 => new FieldDefMD(this, rid2));
 			listMethodDefMD = new SimpleLazyList<MethodDefMD>(ts.MethodTable.Rows, rid2 => new MethodDefMD(this, rid2));
 			listParamDefMD = new SimpleLazyList<ParamDefMD>(ts.ParamTable.Rows, rid2 => new ParamDefMD(this, rid2));
-			listInterfaceImplMD = new SimpleLazyList<InterfaceImplMD>(ts.InterfaceImplTable.Rows, rid2 => new InterfaceImplMD(this, rid2));
-			listMemberRefMD = new SimpleLazyList<MemberRefMD>(ts.MemberRefTable.Rows, rid2 => new MemberRefMD(this, rid2));
+			listInterfaceImplMD = new SimpleLazyList2<InterfaceImplMD>(ts.InterfaceImplTable.Rows, (rid2, gpContext) => new InterfaceImplMD(this, rid2, gpContext));
+			listMemberRefMD = new SimpleLazyList2<MemberRefMD>(ts.MemberRefTable.Rows, (rid2, gpContext) => new MemberRefMD(this, rid2, gpContext));
 			listConstantMD = new SimpleLazyList<ConstantMD>(ts.ConstantTable.Rows, rid2 => new ConstantMD(this, rid2));
 			listDeclSecurityMD = new SimpleLazyList<DeclSecurityMD>(ts.DeclSecurityTable.Rows, rid2 => new DeclSecurityMD(this, rid2));
 			listClassLayoutMD = new SimpleLazyList<ClassLayoutMD>(ts.ClassLayoutTable.Rows, rid2 => new ClassLayoutMD(this, rid2));
-			listStandAloneSigMD = new SimpleLazyList<StandAloneSigMD>(ts.StandAloneSigTable.Rows, rid2 => new StandAloneSigMD(this, rid2));
+			listStandAloneSigMD = new SimpleLazyList2<StandAloneSigMD>(ts.StandAloneSigTable.Rows, (rid2, gpContext) => new StandAloneSigMD(this, rid2, gpContext));
 			listEventDefMD = new SimpleLazyList<EventDefMD>(ts.EventTable.Rows, rid2 => new EventDefMD(this, rid2));
 			listPropertyDefMD = new SimpleLazyList<PropertyDefMD>(ts.PropertyTable.Rows, rid2 => new PropertyDefMD(this, rid2));
 			listModuleRefMD = new SimpleLazyList<ModuleRefMD>(ts.ModuleRefTable.Rows, rid2 => new ModuleRefMD(this, rid2));
-			listTypeSpecMD = new SimpleLazyList<TypeSpecMD>(ts.TypeSpecTable.Rows, rid2 => new TypeSpecMD(this, rid2));
+			listTypeSpecMD = new SimpleLazyList2<TypeSpecMD>(ts.TypeSpecTable.Rows, (rid2, gpContext) => new TypeSpecMD(this, rid2, gpContext));
 			listImplMapMD = new SimpleLazyList<ImplMapMD>(ts.ImplMapTable.Rows, rid2 => new ImplMapMD(this, rid2));
 			listFileDefMD = new SimpleLazyList<FileDefMD>(ts.FileTable.Rows, rid2 => new FileDefMD(this, rid2));
 			listExportedTypeMD = new SimpleLazyList<ExportedTypeMD>(ts.ExportedTypeTable.Rows, rid2 => new ExportedTypeMD(this, rid2));
 			listManifestResourceMD = new SimpleLazyList<ManifestResourceMD>(ts.ManifestResourceTable.Rows, rid2 => new ManifestResourceMD(this, rid2));
 			listGenericParamMD = new SimpleLazyList<GenericParamMD>(ts.GenericParamTable.Rows, rid2 => new GenericParamMD(this, rid2));
-			listMethodSpecMD = new SimpleLazyList<MethodSpecMD>(ts.MethodSpecTable.Rows, rid2 => new MethodSpecMD(this, rid2));
-			listGenericParamConstraintMD = new SimpleLazyList<GenericParamConstraintMD>(ts.GenericParamConstraintTable.Rows, rid2 => new GenericParamConstraintMD(this, rid2));
-
-			location.ReadOriginalValue = () => {
-				return dnFile.MetaData.PEImage.FileName ?? string.Empty;
-			};
-			win32Resources.ReadOriginalValue = () => {
-				return dnFile.MetaData.PEImage.Win32Resources;
-			};
-			vtableFixups.ReadOriginalValue = () => {
-				var vtableFixupsInfo = dnFile.MetaData.ImageCor20Header.VTableFixups;
-				if (vtableFixupsInfo.VirtualAddress == 0 || vtableFixupsInfo.Size == 0)
-					return null;
-				return new VTableFixups(this);
-			};
-#if THREAD_SAFE
-			location.Lock = theLock;
-			win32Resources.Lock = theLock;
-			vtableFixups.Lock = theLock;
-#endif
+			listMethodSpecMD = new SimpleLazyList2<MethodSpecMD>(ts.MethodSpecTable.Rows, (rid2, gpContext) => new MethodSpecMD(this, rid2, gpContext));
+			listGenericParamConstraintMD = new SimpleLazyList2<GenericParamConstraintMD>(ts.GenericParamConstraintTable.Rows, (rid2, gpContext) => new GenericParamConstraintMD(this, rid2, gpContext));
 
 			for (int i = 0; i < 64; i++) {
 				var tbl = TablesStream.Get((Table)i);
@@ -546,6 +639,14 @@ namespace dnlib.DotNet {
 				if (IsGreaterAssemblyRefVersion(corLibAsmRef, asmRef))
 					corLibAsmRef = asmRef;
 			}
+			if (corLibAsmRef != null)
+				return corLibAsmRef;
+
+			// If we've loaded mscorlib itself, it won't have any AssemblyRefs to itself.
+			var asm = Assembly;
+			if (asm != null && asm.IsCorLib())
+				return UpdateRowId(new AssemblyRefUser(asm));
+
 			return corLibAsmRef;
 		}
 
@@ -560,13 +661,13 @@ namespace dnlib.DotNet {
 		/// <inheritdoc/>
 		protected override void Dispose(bool disposing) {
 			// Call base first since it will dispose of all the resources, which will
-			// eventually use dnFile that we will dispose
+			// eventually use metaData that we will dispose
 			base.Dispose(disposing);
 			if (disposing) {
-				var dnf = dnFile;
-				if (dnf != null)
-					dnf.Dispose();
-				dnFile = null;
+				var md = metaData;
+				if (md != null)
+					md.Dispose();
+				metaData = null;
 			}
 		}
 
@@ -576,7 +677,17 @@ namespace dnlib.DotNet {
 		/// <param name="mdToken">The metadata token</param>
 		/// <returns>A <see cref="IMDTokenProvider"/> or <c>null</c> if <paramref name="mdToken"/> is invalid</returns>
 		public IMDTokenProvider ResolveToken(MDToken mdToken) {
-			return ResolveToken(mdToken.Raw);
+			return ResolveToken(mdToken.Raw, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a token
+		/// </summary>
+		/// <param name="mdToken">The metadata token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="IMDTokenProvider"/> or <c>null</c> if <paramref name="mdToken"/> is invalid</returns>
+		public IMDTokenProvider ResolveToken(MDToken mdToken, GenericParamContext gpContext) {
+			return ResolveToken(mdToken.Raw, gpContext);
 		}
 
 		/// <summary>
@@ -585,7 +696,17 @@ namespace dnlib.DotNet {
 		/// <param name="token">The metadata token</param>
 		/// <returns>A <see cref="IMDTokenProvider"/> or <c>null</c> if <paramref name="token"/> is invalid</returns>
 		public IMDTokenProvider ResolveToken(int token) {
-			return ResolveToken((uint)token);
+			return ResolveToken((uint)token, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a token
+		/// </summary>
+		/// <param name="token">The metadata token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="IMDTokenProvider"/> or <c>null</c> if <paramref name="token"/> is invalid</returns>
+		public IMDTokenProvider ResolveToken(int token, GenericParamContext gpContext) {
+			return ResolveToken((uint)token, gpContext);
 		}
 
 		/// <summary>
@@ -594,6 +715,16 @@ namespace dnlib.DotNet {
 		/// <param name="token">The metadata token</param>
 		/// <returns>A <see cref="IMDTokenProvider"/> or <c>null</c> if <paramref name="token"/> is invalid</returns>
 		public IMDTokenProvider ResolveToken(uint token) {
+			return ResolveToken(token, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a token
+		/// </summary>
+		/// <param name="token">The metadata token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="IMDTokenProvider"/> or <c>null</c> if <paramref name="token"/> is invalid</returns>
+		public IMDTokenProvider ResolveToken(uint token, GenericParamContext gpContext) {
 			uint rid = MDToken.ToRID(token);
 			switch (MDToken.ToTable(token)) {
 			case Table.Module:			return ResolveModule(rid);
@@ -602,16 +733,16 @@ namespace dnlib.DotNet {
 			case Table.Field:			return ResolveField(rid);
 			case Table.Method:			return ResolveMethod(rid);
 			case Table.Param:			return ResolveParam(rid);
-			case Table.InterfaceImpl:	return ResolveInterfaceImpl(rid);
-			case Table.MemberRef:		return ResolveMemberRef(rid);
+			case Table.InterfaceImpl:	return ResolveInterfaceImpl(rid, gpContext);
+			case Table.MemberRef:		return ResolveMemberRef(rid, gpContext);
 			case Table.Constant:		return ResolveConstant(rid);
 			case Table.DeclSecurity:	return ResolveDeclSecurity(rid);
 			case Table.ClassLayout:		return ResolveClassLayout(rid);
-			case Table.StandAloneSig:	return ResolveStandAloneSig(rid);
+			case Table.StandAloneSig:	return ResolveStandAloneSig(rid, gpContext);
 			case Table.Event:			return ResolveEvent(rid);
 			case Table.Property:		return ResolveProperty(rid);
 			case Table.ModuleRef:		return ResolveModuleRef(rid);
-			case Table.TypeSpec:		return ResolveTypeSpec(rid);
+			case Table.TypeSpec:		return ResolveTypeSpec(rid, gpContext);
 			case Table.ImplMap:			return ResolveImplMap(rid);
 			case Table.Assembly:		return ResolveAssembly(rid);
 			case Table.AssemblyRef:		return ResolveAssemblyRef(rid);
@@ -619,8 +750,8 @@ namespace dnlib.DotNet {
 			case Table.ExportedType:	return ResolveExportedType(rid);
 			case Table.ManifestResource:return ResolveManifestResource(rid);
 			case Table.GenericParam:	return ResolveGenericParam(rid);
-			case Table.MethodSpec:		return ResolveMethodSpec(rid);
-			case Table.GenericParamConstraint: return ResolveGenericParamConstraint(rid);
+			case Table.MethodSpec:		return ResolveMethodSpec(rid, gpContext);
+			case Table.GenericParamConstraint: return ResolveGenericParamConstraint(rid, gpContext);
 			}
 			return null;
 		}
@@ -685,7 +816,17 @@ namespace dnlib.DotNet {
 		/// <param name="rid">The row ID</param>
 		/// <returns>A <see cref="InterfaceImpl"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
 		public InterfaceImpl ResolveInterfaceImpl(uint rid) {
-			return listInterfaceImplMD[rid - 1];
+			return listInterfaceImplMD[rid - 1, new GenericParamContext()];
+		}
+
+		/// <summary>
+		/// Resolves an <see cref="InterfaceImpl"/>
+		/// </summary>
+		/// <param name="rid">The row ID</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="InterfaceImpl"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
+		public InterfaceImpl ResolveInterfaceImpl(uint rid, GenericParamContext gpContext) {
+			return listInterfaceImplMD[rid - 1, gpContext];
 		}
 
 		/// <summary>
@@ -694,7 +835,17 @@ namespace dnlib.DotNet {
 		/// <param name="rid">The row ID</param>
 		/// <returns>A <see cref="MemberRef"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
 		public MemberRef ResolveMemberRef(uint rid) {
-			return listMemberRefMD[rid - 1];
+			return listMemberRefMD[rid - 1, new GenericParamContext()];
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="MemberRef"/>
+		/// </summary>
+		/// <param name="rid">The row ID</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="MemberRef"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
+		public MemberRef ResolveMemberRef(uint rid, GenericParamContext gpContext) {
+			return listMemberRefMD[rid - 1, gpContext];
 		}
 
 		/// <summary>
@@ -730,7 +881,17 @@ namespace dnlib.DotNet {
 		/// <param name="rid">The row ID</param>
 		/// <returns>A <see cref="StandAloneSig"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
 		public StandAloneSig ResolveStandAloneSig(uint rid) {
-			return listStandAloneSigMD[rid - 1];
+			return listStandAloneSigMD[rid - 1, new GenericParamContext()];
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="StandAloneSig"/>
+		/// </summary>
+		/// <param name="rid">The row ID</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="StandAloneSig"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
+		public StandAloneSig ResolveStandAloneSig(uint rid, GenericParamContext gpContext) {
+			return listStandAloneSigMD[rid - 1, gpContext];
 		}
 
 		/// <summary>
@@ -766,7 +927,17 @@ namespace dnlib.DotNet {
 		/// <param name="rid">The row ID</param>
 		/// <returns>A <see cref="TypeSpec"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
 		public TypeSpec ResolveTypeSpec(uint rid) {
-			return listTypeSpecMD[rid - 1];
+			return listTypeSpecMD[rid - 1, new GenericParamContext()];
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="TypeSpec"/>
+		/// </summary>
+		/// <param name="rid">The row ID</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="TypeSpec"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
+		public TypeSpec ResolveTypeSpec(uint rid, GenericParamContext gpContext) {
+			return listTypeSpecMD[rid - 1, gpContext];
 		}
 
 		/// <summary>
@@ -838,7 +1009,17 @@ namespace dnlib.DotNet {
 		/// <param name="rid">The row ID</param>
 		/// <returns>A <see cref="MethodSpec"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
 		public MethodSpec ResolveMethodSpec(uint rid) {
-			return listMethodSpecMD[rid - 1];
+			return listMethodSpecMD[rid - 1, new GenericParamContext()];
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="MethodSpec"/>
+		/// </summary>
+		/// <param name="rid">The row ID</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="MethodSpec"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
+		public MethodSpec ResolveMethodSpec(uint rid, GenericParamContext gpContext) {
+			return listMethodSpecMD[rid - 1, gpContext];
 		}
 
 		/// <summary>
@@ -847,7 +1028,17 @@ namespace dnlib.DotNet {
 		/// <param name="rid">The row ID</param>
 		/// <returns>A <see cref="GenericParamConstraint"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
 		public GenericParamConstraint ResolveGenericParamConstraint(uint rid) {
-			return listGenericParamConstraintMD[rid - 1];
+			return listGenericParamConstraintMD[rid - 1, new GenericParamContext()];
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="GenericParamConstraint"/>
+		/// </summary>
+		/// <param name="rid">The row ID</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="GenericParamConstraint"/> instance or <c>null</c> if <paramref name="rid"/> is invalid</returns>
+		public GenericParamConstraint ResolveGenericParamConstraint(uint rid, GenericParamContext gpContext) {
+			return listGenericParamConstraintMD[rid - 1, gpContext];
 		}
 
 		/// <summary>
@@ -856,6 +1047,16 @@ namespace dnlib.DotNet {
 		/// <param name="codedToken">A <c>TypeDefOrRef</c> coded token</param>
 		/// <returns>A <see cref="ITypeDefOrRef"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
 		public ITypeDefOrRef ResolveTypeDefOrRef(uint codedToken) {
+			return ResolveTypeDefOrRef(codedToken, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="ITypeDefOrRef"/>
+		/// </summary>
+		/// <param name="codedToken">A <c>TypeDefOrRef</c> coded token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="ITypeDefOrRef"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
+		public ITypeDefOrRef ResolveTypeDefOrRef(uint codedToken, GenericParamContext gpContext) {
 			uint token;
 			if (!CodedToken.TypeDefOrRef.Decode(codedToken, out token))
 				return null;
@@ -863,7 +1064,7 @@ namespace dnlib.DotNet {
 			switch (MDToken.ToTable(token)) {
 			case Table.TypeDef:		return ResolveTypeDef(rid);
 			case Table.TypeRef:		return ResolveTypeRef(rid);
-			case Table.TypeSpec:	return ResolveTypeSpec(rid);
+			case Table.TypeSpec:	return ResolveTypeSpec(rid, gpContext);
 			}
 			return null;
 		}
@@ -892,6 +1093,16 @@ namespace dnlib.DotNet {
 		/// <param name="codedToken">A <c>HasCustomAttribute</c> coded token</param>
 		/// <returns>A <see cref="IHasCustomAttribute"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
 		public IHasCustomAttribute ResolveHasCustomAttribute(uint codedToken) {
+			return ResolveHasCustomAttribute(codedToken, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="IHasCustomAttribute"/>
+		/// </summary>
+		/// <param name="codedToken">A <c>HasCustomAttribute</c> coded token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="IHasCustomAttribute"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
+		public IHasCustomAttribute ResolveHasCustomAttribute(uint codedToken, GenericParamContext gpContext) {
 			uint token;
 			if (!CodedToken.HasCustomAttribute.Decode(codedToken, out token))
 				return null;
@@ -902,23 +1113,23 @@ namespace dnlib.DotNet {
 			case Table.TypeRef:		return ResolveTypeRef(rid);
 			case Table.TypeDef:		return ResolveTypeDef(rid);
 			case Table.Param:		return ResolveParam(rid);
-			case Table.InterfaceImpl: return ResolveInterfaceImpl(rid);
-			case Table.MemberRef:	return ResolveMemberRef(rid);
+			case Table.InterfaceImpl: return ResolveInterfaceImpl(rid, gpContext);
+			case Table.MemberRef:	return ResolveMemberRef(rid, gpContext);
 			case Table.Module:		return ResolveModule(rid);
 			case Table.DeclSecurity:return ResolveDeclSecurity(rid);
 			case Table.Property:	return ResolveProperty(rid);
 			case Table.Event:		return ResolveEvent(rid);
-			case Table.StandAloneSig: return ResolveStandAloneSig(rid);
+			case Table.StandAloneSig: return ResolveStandAloneSig(rid, gpContext);
 			case Table.ModuleRef:	return ResolveModuleRef(rid);
-			case Table.TypeSpec:	return ResolveTypeSpec(rid);
+			case Table.TypeSpec:	return ResolveTypeSpec(rid, gpContext);
 			case Table.Assembly:	return ResolveAssembly(rid);
 			case Table.AssemblyRef:	return ResolveAssemblyRef(rid);
 			case Table.File:		return ResolveFile(rid);
 			case Table.ExportedType:return ResolveExportedType(rid);
 			case Table.ManifestResource: return ResolveManifestResource(rid);
 			case Table.GenericParam:return ResolveGenericParam(rid);
-			case Table.GenericParamConstraint: return ResolveGenericParamConstraint(rid);
-			case Table.MethodSpec:	return ResolveMethodSpec(rid);
+			case Table.MethodSpec:	return ResolveMethodSpec(rid, gpContext);
+			case Table.GenericParamConstraint: return ResolveGenericParamConstraint(rid, gpContext);
 			}
 			return null;
 		}
@@ -964,6 +1175,16 @@ namespace dnlib.DotNet {
 		/// <param name="codedToken">A <c>MemberRefParent</c> coded token</param>
 		/// <returns>A <see cref="IMemberRefParent"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
 		public IMemberRefParent ResolveMemberRefParent(uint codedToken) {
+			return ResolveMemberRefParent(codedToken, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="IMemberRefParent"/>
+		/// </summary>
+		/// <param name="codedToken">A <c>MemberRefParent</c> coded token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="IMemberRefParent"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
+		public IMemberRefParent ResolveMemberRefParent(uint codedToken, GenericParamContext gpContext) {
 			uint token;
 			if (!CodedToken.MemberRefParent.Decode(codedToken, out token))
 				return null;
@@ -973,7 +1194,7 @@ namespace dnlib.DotNet {
 			case Table.TypeRef:		return ResolveTypeRef(rid);
 			case Table.ModuleRef:	return ResolveModuleRef(rid);
 			case Table.Method:		return ResolveMethod(rid);
-			case Table.TypeSpec:	return ResolveTypeSpec(rid);
+			case Table.TypeSpec:	return ResolveTypeSpec(rid, gpContext);
 			}
 			return null;
 		}
@@ -1001,13 +1222,23 @@ namespace dnlib.DotNet {
 		/// <param name="codedToken">A <c>MethodDefOrRef</c> coded token</param>
 		/// <returns>A <see cref="IMethodDefOrRef"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
 		public IMethodDefOrRef ResolveMethodDefOrRef(uint codedToken) {
+			return ResolveMethodDefOrRef(codedToken, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="IMethodDefOrRef"/>
+		/// </summary>
+		/// <param name="codedToken">A <c>MethodDefOrRef</c> coded token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="IMethodDefOrRef"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
+		public IMethodDefOrRef ResolveMethodDefOrRef(uint codedToken, GenericParamContext gpContext) {
 			uint token;
 			if (!CodedToken.MethodDefOrRef.Decode(codedToken, out token))
 				return null;
 			uint rid = MDToken.ToRID(token);
 			switch (MDToken.ToTable(token)) {
 			case Table.Method:		return ResolveMethod(rid);
-			case Table.MemberRef:	return ResolveMemberRef(rid);
+			case Table.MemberRef:	return ResolveMemberRef(rid, gpContext);
 			}
 			return null;
 		}
@@ -1053,13 +1284,23 @@ namespace dnlib.DotNet {
 		/// <param name="codedToken">A <c>CustomAttributeType</c> coded token</param>
 		/// <returns>A <see cref="ICustomAttributeType"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
 		public ICustomAttributeType ResolveCustomAttributeType(uint codedToken) {
+			return ResolveCustomAttributeType(codedToken, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Resolves a <see cref="ICustomAttributeType"/>
+		/// </summary>
+		/// <param name="codedToken">A <c>CustomAttributeType</c> coded token</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A <see cref="ICustomAttributeType"/> or <c>null</c> if <paramref name="codedToken"/> is invalid</returns>
+		public ICustomAttributeType ResolveCustomAttributeType(uint codedToken, GenericParamContext gpContext) {
 			uint token;
 			if (!CodedToken.CustomAttributeType.Decode(codedToken, out token))
 				return null;
 			uint rid = MDToken.ToRID(token);
 			switch (MDToken.ToTable(token)) {
 			case Table.Method:		return ResolveMethod(rid);
-			case Table.MemberRef:	return ResolveMemberRef(rid);
+			case Table.MemberRef:	return ResolveMemberRef(rid, gpContext);
 			}
 			return null;
 		}
@@ -1107,7 +1348,18 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="CallingConventionSig"/> instance or <c>null</c> if
 		/// <paramref name="sig"/> is invalid.</returns>
 		public CallingConventionSig ReadSignature(uint sig) {
-			return SignatureReader.ReadSig(this, sig);
+			return SignatureReader.ReadSig(this, sig, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a signature from the #Blob stream
+		/// </summary>
+		/// <param name="sig">#Blob stream offset of signature</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A new <see cref="CallingConventionSig"/> instance or <c>null</c> if
+		/// <paramref name="sig"/> is invalid.</returns>
+		public CallingConventionSig ReadSignature(uint sig, GenericParamContext gpContext) {
+			return SignatureReader.ReadSig(this, sig, gpContext);
 		}
 
 		/// <summary>
@@ -1117,7 +1369,18 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="TypeSig"/> instance or <c>null</c> if
 		/// <paramref name="sig"/> is invalid.</returns>
 		public TypeSig ReadTypeSignature(uint sig) {
-			return SignatureReader.ReadTypeSig(this, sig);
+			return SignatureReader.ReadTypeSig(this, sig, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a type signature from the #Blob stream
+		/// </summary>
+		/// <param name="sig">#Blob stream offset of signature</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A new <see cref="TypeSig"/> instance or <c>null</c> if
+		/// <paramref name="sig"/> is invalid.</returns>
+		public TypeSig ReadTypeSignature(uint sig, GenericParamContext gpContext) {
+			return SignatureReader.ReadTypeSig(this, sig, gpContext);
 		}
 
 		/// <summary>
@@ -1129,7 +1392,20 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="TypeSig"/> instance or <c>null</c> if
 		/// <paramref name="sig"/> is invalid.</returns>
 		public TypeSig ReadTypeSignature(uint sig, out byte[] extraData) {
-			return SignatureReader.ReadTypeSig(this, sig, out extraData);
+			return SignatureReader.ReadTypeSig(this, sig, new GenericParamContext(), out extraData);
+		}
+
+		/// <summary>
+		/// Reads a type signature from the #Blob stream
+		/// </summary>
+		/// <param name="sig">#Blob stream offset of signature</param>
+		/// <param name="extraData">If there's any extra data after the signature, it's saved
+		/// here, else this will be <c>null</c></param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A new <see cref="TypeSig"/> instance or <c>null</c> if
+		/// <paramref name="sig"/> is invalid.</returns>
+		public TypeSig ReadTypeSignature(uint sig, GenericParamContext gpContext, out byte[] extraData) {
+			return SignatureReader.ReadTypeSig(this, sig, gpContext, out extraData);
 		}
 
 		/// <summary>
@@ -1137,13 +1413,14 @@ namespace dnlib.DotNet {
 		/// </summary>
 		/// <param name="table">Table of owner</param>
 		/// <param name="rid">Row ID of owner</param>
+		/// <param name="gpContext">Generic parameter context</param>
 		/// <returns>A new <see cref="MarshalType"/> instance or <c>null</c> if there's no field
 		/// marshal for this owner.</returns>
-		internal MarshalType ReadMarshalType(Table table, uint rid) {
+		internal MarshalType ReadMarshalType(Table table, uint rid, GenericParamContext gpContext) {
 			var row = TablesStream.ReadFieldMarshalRow(MetaData.GetFieldMarshalRid(table, rid));
 			if (row == null)
 				return null;
-			return MarshalBlobReader.Read(this, row.NativeType);
+			return MarshalBlobReader.Read(this, row.NativeType, gpContext);
 		}
 
 		/// <summary>
@@ -1154,6 +1431,18 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="CilBody"/> instance. It's empty if RVA is invalid (eg. 0 or
 		/// it doesn't point to a CIL method body)</returns>
 		public CilBody ReadCilBody(IList<Parameter> parameters, RVA rva) {
+			return ReadCilBody(parameters, rva, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a CIL method body
+		/// </summary>
+		/// <param name="parameters">Method parameters</param>
+		/// <param name="rva">RVA</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A new <see cref="CilBody"/> instance. It's empty if RVA is invalid (eg. 0 or
+		/// it doesn't point to a CIL method body)</returns>
+		public CilBody ReadCilBody(IList<Parameter> parameters, RVA rva, GenericParamContext gpContext) {
 			if (rva == 0)
 				return new CilBody();
 
@@ -1162,9 +1451,9 @@ namespace dnlib.DotNet {
 			// If we create a partial stream starting from rva, then position will be 0 and always
 			// 4-byte aligned. All fat method bodies should be 4-byte aligned, but the CLR doesn't
 			// seem to verify it. We must parse the method exactly the way the CLR parses it.
-			using (var reader = dnFile.MetaData.PEImage.CreateFullStream()) {
-				reader.Position = (long)dnFile.MetaData.PEImage.ToFileOffset(rva);
-				return MethodBodyReader.CreateCilBody(this, reader, parameters);
+			using (var reader = metaData.PEImage.CreateFullStream()) {
+				reader.Position = (long)metaData.PEImage.ToFileOffset(rva);
+				return MethodBodyReader.CreateCilBody(this, reader, parameters, gpContext);
 			}
 		}
 
@@ -1382,8 +1671,8 @@ namespace dnlib.DotNet {
 		IImageStream CreateResourceStream(uint offset) {
 			IImageStream fs = null, imageStream = null;
 			try {
-				var peImage = dnFile.MetaData.PEImage;
-				var cor20Header = dnFile.MetaData.ImageCor20Header;
+				var peImage = metaData.PEImage;
+				var cor20Header = metaData.ImageCor20Header;
 				var resources = cor20Header.Resources;
 				if (resources.VirtualAddress == 0 || resources.Size == 0)
 					return MemoryImageStream.CreateEmpty();
@@ -1431,10 +1720,21 @@ namespace dnlib.DotNet {
 		/// <returns>A new <see cref="CustomAttribute"/> instance or <c>null</c> if
 		/// <paramref name="caRid"/> is invalid</returns>
 		public CustomAttribute ReadCustomAttribute(uint caRid) {
+			return ReadCustomAttribute(caRid, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a <see cref="CustomAttribute"/>
+		/// </summary>
+		/// <param name="caRid">Custom attribute rid</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A new <see cref="CustomAttribute"/> instance or <c>null</c> if
+		/// <paramref name="caRid"/> is invalid</returns>
+		public CustomAttribute ReadCustomAttribute(uint caRid, GenericParamContext gpContext) {
 			var caRow = TablesStream.ReadCustomAttributeRow(caRid);
 			if (caRow == null)
 				return null;
-			return CustomAttributeReader.Read(this, ResolveCustomAttributeType(caRow.Type), caRow.Value);
+			return CustomAttributeReader.Read(this, ResolveCustomAttributeType(caRow.Type, gpContext), caRow.Value, gpContext);
 		}
 
 		/// <summary>
@@ -1500,11 +1800,21 @@ namespace dnlib.DotNet {
 		}
 
 		/// <summary>
-		/// Gets all <see cref="MemberRef"/>s
+		/// Gets all <see cref="MemberRef"/>s. <see cref="MemberRef"/>s with generic parameters
+		/// aren't cached and a new copy is always returned.
 		/// </summary>
 		public IEnumerable<MemberRef> GetMemberRefs() {
+			return GetMemberRefs(new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Gets all <see cref="MemberRef"/>s. <see cref="MemberRef"/>s with generic parameters
+		/// aren't cached and a new copy is always returned.
+		/// </summary>
+		/// <param name="gpContext">Generic parameter context</param>
+		public IEnumerable<MemberRef> GetMemberRefs(GenericParamContext gpContext) {
 			for (uint rid = 1; ; rid++) {
-				var mr = ResolveMemberRef(rid);
+				var mr = ResolveMemberRef(rid, gpContext);
 				if (mr == null)
 					break;
 				yield return mr;
@@ -1589,29 +1899,57 @@ namespace dnlib.DotNet {
 		/// <param name="rid">Row ID</param>
 		/// <returns>A new <see cref="GenericParamConstraintMD"/> instance</returns>
 		internal GenericParamConstraintMD ReadGenericParamConstraint(uint rid) {
-			return new GenericParamConstraintMD(this, rid);
+			return new GenericParamConstraintMD(this, rid, new GenericParamContext());
+		}
+
+		/// <summary>
+		/// Reads a new <see cref="GenericParamConstraintMD"/> instance. This one is not cached.
+		/// </summary>
+		/// <param name="rid">Row ID</param>
+		/// <param name="gpContext">Generic parameter context</param>
+		/// <returns>A new <see cref="GenericParamConstraintMD"/> instance</returns>
+		internal GenericParamConstraintMD ReadGenericParamConstraint(uint rid, GenericParamContext gpContext) {
+			return new GenericParamConstraintMD(this, rid, gpContext);
 		}
 
 		/// <summary>
 		/// Reads a method body
 		/// </summary>
 		/// <param name="method">Method</param>
-		/// <param name="row">Method's row</param>
+		/// <param name="rva">Method RVA</param>
+		/// <param name="implAttrs">Method impl attrs</param>
+		/// <param name="gpContext">Generic parameter context</param>
 		/// <returns>A <see cref="MethodBody"/> or <c>null</c> if none</returns>
-		internal MethodBody ReadMethodBody(MethodDefMD method, RawMethodRow row) {
+		internal MethodBody ReadMethodBody(MethodDefMD method, RVA rva, MethodImplAttributes implAttrs, GenericParamContext gpContext) {
 			MethodBody mb;
 			var mDec = methodDecrypter;
-			if (mDec != null && mDec.GetMethodBody(method.OrigRid, (RVA)row.RVA, method.Parameters, out mb))
+			if (mDec != null && mDec.GetMethodBody(method.OrigRid, rva, method.Parameters, gpContext, out mb)) {
+				var cilBody = mb as CilBody;
+				if (cilBody != null)
+					return InitializeBodyFromPdb(cilBody, method.OrigRid);
 				return mb;
+			}
 
-			if (row.RVA == 0)
+			if (rva == 0)
 				return null;
-			var codeType = (MethodImplAttributes)row.ImplFlags & MethodImplAttributes.CodeTypeMask;
+			var codeType = implAttrs & MethodImplAttributes.CodeTypeMask;
 			if (codeType == MethodImplAttributes.IL)
-				return ReadCilBody(method.Parameters, (RVA)row.RVA);
+				return InitializeBodyFromPdb(ReadCilBody(method.Parameters, rva, gpContext), method.OrigRid);
 			if (codeType == MethodImplAttributes.Native)
-				return new NativeMethodBody((RVA)row.RVA);
+				return new NativeMethodBody(rva);
 			return null;
+		}
+
+		/// <summary>
+		/// Updates <paramref name="body"/> with the PDB info (if any)
+		/// </summary>
+		/// <param name="body">Method body</param>
+		/// <param name="rid">Method rid</param>
+		/// <returns>Returns originak <paramref name="body"/> value</returns>
+		CilBody InitializeBodyFromPdb(CilBody body, uint rid) {
+			if (pdbState != null)
+				pdbState.Initialize(body, rid);
+			return body;
 		}
 
 		/// <summary>
