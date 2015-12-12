@@ -24,7 +24,7 @@ namespace dnlib.DotNet {
 		static readonly string[] assemblyExtensions = new string[] { ".dll", ".exe" };
 		static readonly string[] winMDAssemblyExtensions = new string[] { ".winmd" };
 
-		List<GacInfo> gacInfos;
+		List<GacInfo> gacInfos = new List<GacInfo>();
 		List<string> extraMonoPaths;
 		static readonly string[] monoVerDirs = new string[] {
 			"4.5", "4.0",
@@ -59,8 +59,6 @@ namespace dnlib.DotNet {
 		}
 
 		void InitGacInfos() {
-			gacInfos = new List<GacInfo>();
-
 			if (Type.GetType("Mono.Runtime") != null) {
 				var dirs = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 				extraMonoPaths = new List<string>();
