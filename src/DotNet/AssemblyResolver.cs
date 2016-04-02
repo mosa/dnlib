@@ -39,7 +39,8 @@ namespace dnlib.DotNet {
 		readonly ThreadSafe.IList<string> postSearchPaths = ThreadSafeListCreator.Create<string>();
 		bool findExactMatch;
 		bool enableFrameworkRedirect;
-		bool enableTypeDefCache;
+		bool enableTypeDefCache = true;
+		bool useGac = true;
 #if THREAD_SAFE
 		readonly Lock theLock = Lock.Create();
 #endif
@@ -164,11 +165,20 @@ namespace dnlib.DotNet {
 
 		/// <summary>
 		/// If <c>true</c>, all modules in newly resolved assemblies will have their
-		/// <see cref="ModuleDef.EnableTypeDefFindCache"/> property set to <c>true</c>.
+		/// <see cref="ModuleDef.EnableTypeDefFindCache"/> property set to <c>true</c>. This is
+		/// enabled by default since these modules shouldn't be modified by the user.
 		/// </summary>
 		public bool EnableTypeDefCache {
 			get { return enableTypeDefCache; }
 			set { enableTypeDefCache = value; }
+		}
+
+		/// <summary>
+		/// true to search the Global Assembly Cache. Default value is true.
+		/// </summary>
+		public bool UseGAC {
+			get { return useGac; }
+			set { useGac = value; }
 		}
 
 		/// <summary>
@@ -512,8 +522,10 @@ namespace dnlib.DotNet {
 					yield return path;
 			}
 			else {
-				foreach (var path in FindAssembliesGac(assembly, sourceModule, matchExactly))
-					yield return path;
+				if (UseGAC) {
+					foreach (var path in FindAssembliesGac(assembly, sourceModule, matchExactly))
+						yield return path;
+				}
 			}
 			foreach (var path in FindAssembliesModuleSearchPaths(assembly, sourceModule, matchExactly))
 				yield return path;
